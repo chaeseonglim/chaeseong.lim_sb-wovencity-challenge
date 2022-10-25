@@ -1,0 +1,10 @@
+.vscode/*
+unit_test/*
+build/*
+scripts/build
+scripts/dist
+*.o
+test
+*.pyc
+*.pyo
+samples/test1
