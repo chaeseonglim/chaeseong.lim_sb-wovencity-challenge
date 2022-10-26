@@ -63,23 +63,19 @@ extern "C" {
 // Number of hash of Public key in the OTP
 #define NUM_PK_OTP    1
 
-// Not used in current PoC
+// Used in the old implementation based on TLV
 struct img_hdr {
     uint32_t ih_magic;
-    uint32_t image_off; /* offset to the image  */
-    uint32_t image_len; /* Size of image (in bytes). */
-    uint32_t pk_off;    /* offset to the public key  */
-    uint32_t pk_len;    /* Size of public key (in bytes). */
-    uint32_t hash_off; /* offset to the image  */
-    uint32_t hash_len; /* Size of image (in bytes). */
-    uint32_t sign_off;  /* offset to the signature  */
-    uint32_t sign_len;  /* Size of signature (in bytes). */
-    //uint32_t pad;
-    //uint32_t versioning;
+    uint32_t image_off;     /* offset to the image  */
+    uint32_t image_len;     /* Size of image (in bytes). */
+    uint32_t pk_off;        /* offset to the public key  */
+    uint32_t pk_len;        /* Size of public key (in bytes). */
+    uint32_t hash_off;      /* offset to the hash  */
+    uint32_t hash_len;      /* Size of hash. */
+    uint32_t sign_off;      /* offset to the signature  */
+    uint32_t sign_len;      /* Size of signature (in bytes). */
 };
 
-// i will generate a macro because it will change depending of endianness - > add macro
-// and size of the header direct in code.
 #define IMAGE_MAGIC     0x28FEB8C6
 #define IMAGE_HDR_SZ    sizeof(struct img_hdr)
 

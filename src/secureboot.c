@@ -95,44 +95,6 @@ static int hex_to_base64(char *encoded, const unsigned char *string, size_t len)
     return p - encoded;
 }
 
-
-/**
- * @brief Validate the SHA256 of the image including header and body
- */
-static int
-secureboot_hash_image_hdr_body(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz, 
-                uint8_t *hash_result)
-{
-    SHA256_CTX sha256_ctx;
-    uint32_t blk_sz = 0;
-    uint32_t size;
-    uint32_t off;
-    int rc = VERIFY_GENERIC_ERROR;
-
-    // TODO: add sanity check to prevent overrun if size payload + size of image bigger than sizeof(uint32_t)
-    SHA256_Init(&sha256_ctx);
-    // Hash is computed over image header and image itself.
-    size = IMAGE_HDR_SZ;
-    size += getFieldFromHeader(payload, OFF_IMG_LEN);
-    // for images bigger than 1000 to avoid overflowing tmp buffer
-    for (off = 0; off < size; off += blk_sz) {
-        blk_sz = size - off;
-        if (blk_sz > tmp_buf_sz) {
-            blk_sz = tmp_buf_sz;
-        }
-        memcpy(tmp_buf, payload + off, blk_sz); 
-        SHA256_Update(&sha256_ctx, tmp_buf, blk_sz);
-    }
-    SHA256_Final(hash_result, &sha256_ctx);
-    memcpy(tmp_buf, payload + getFieldFromHeader(payload, OFF_HASH) + 1, HASH_SZ );
-    if ( ! memcmp(hash_result, tmp_buf , HASH_SZ) ){
-        LOG_DEBUG("hash is correct", hash_result, HASH_SZ, true);
-        rc = VERIFY_SUCCESS;
-    }
-    (void)sha256_ctx;
-    return rc;
-}
-
 /**
  * @brief Validate the SHA256 of the public key part of the trailer and comparing 
  *        with the reference value in the OTP 
@@ -174,6 +136,49 @@ secureboot_hash_pubkey(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz,
     return rc;
 }
 
+/**
+ * @brief Validate the SHA256 of the image including header and body
+ */
+static int
+secureboot_hash_image_hdr_body(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz, 
+                uint8_t *hash_result)
+{
+    SHA256_CTX sha256_ctx;
+    uint32_t blk_sz = 0;
+    uint32_t size;
+    uint32_t off;
+    int rc = VERIFY_GENERIC_ERROR;
+
+    // TODO: add sanity check to prevent overrun if size payload + size of image bigger than sizeof(uint32_t)
+    SHA256_Init(&sha256_ctx);
+    // Hash is computed over image header and image itself.
+    size = IMAGE_HDR_SZ;
+    size += getFieldFromHeader(payload, OFF_IMG_LEN);
+    size += getFieldFromHeader(payload, OFF_PK_LEN);
+    // for images bigger than 1000 to avoid overflowing tmp buffer
+    for (off = 0; off < size; off += blk_sz) {
+        blk_sz = size - off;
+        if (blk_sz > tmp_buf_sz) {
+            blk_sz = tmp_buf_sz;
+        }
+        memcpy(tmp_buf, payload + off, blk_sz); 
+        SHA256_Update(&sha256_ctx, tmp_buf, blk_sz);
+    }
+    SHA256_Final(hash_result, &sha256_ctx);
+    memcpy(tmp_buf, payload + getFieldFromHeader(payload, OFF_HASH) + 1, HASH_SZ );
+    if ( ! memcmp(hash_result, tmp_buf , HASH_SZ) ){
+        LOG_DEBUG("hash of header + body + public key is correct", hash_result, HASH_SZ, true);
+        rc = VERIFY_SUCCESS;
+    }
+    (void)sha256_ctx;
+    return rc;
+}
+
+
+/**
+ * @brief initialize random in openssl
+ * 
+ */
 static void init_openssl(void)
 {
     if(SSL_library_init())
@@ -312,14 +317,14 @@ secureboot_validate_image( uint8_t *payload, uint8_t *tmp_buf,
     uint8_t hash[HASH_SZ];
     int rc , key_id = VERIFY_GENERIC_ERROR;
  
-    //validate the hash of the public key with one store in OTP
+    //validate the hash of the public key with the one stored in the OTP
     rc = secureboot_hash_pubkey(payload, tmp_buf, tmp_buf_sz, 
                 hash, &key_id);
     if ( rc ||  0 > key_id || key_id > NUM_PK_OTP ) {
         // error means that hash of PK not matching ones in the OTP 
         goto out;
     }
-    //validate the hash of the image header and body
+    //validate the hash of the image header and body with the one computed
     rc =  secureboot_hash_image_hdr_body(payload, tmp_buf,tmp_buf_sz, hash);
     if (rc) {
         // error means that sha is not done

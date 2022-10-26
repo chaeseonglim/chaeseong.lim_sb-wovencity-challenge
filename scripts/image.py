@@ -133,9 +133,9 @@ class Image():
                   (32).to_bytes(4, byteorder = self.endian) + \
                   (IMAGE_HEADER_SIZE - 1 + len(self.img_payload) + 32 + len(key)).to_bytes(4, byteorder = self.endian) + \
                   (SIGN_SIZE).to_bytes(4, byteorder = self.endian) + \
-                  self.img_payload
+                  self.img_payload 
 
-        digest = SHA256.new(self.img_payload)
+        digest = SHA256.new(self.img_payload + key )
         logging.debug("header + image digest= {}".format(digest.hexdigest()))
 
         try:
@@ -168,7 +168,13 @@ class Image():
 
     def verifySignature(self):
         """ Verify the signature RSA based on PSS or PKCS1v15 """
-        digest = SHA256.new(self.img_payload)
+        if self.hazmat:
+            key = self.public_key.public_bytes(
+            encoding=serialization.Encoding.DER,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo)
+        else:
+            key = self.public_key
+        digest = SHA256.new(self.img_payload + key)
         try:
             if self.hazmat:
                 if self.pss:
