@@ -12,14 +12,15 @@
  */
 int do_unittest(void)
 {
+    int rc = VERIFY_GENERIC_ERROR;
+
     // Test secureboot_memcmp()
-    int res = secureboot_unittest_memcmp();
-    printf( "secureboot_unittest_memcmp() - %d\n", res );
+    rc = secureboot_unittest_memcmp();
 
-    res |= secureboot_unittest_rollback();
-    printf( "secureboot_unittest_rollback() - %d\n", res );
+    // Test secureboot_rollback()
+    rc |= secureboot_unittest_rollback();
 
-    return res;
+    return rc;
 }
 
 int main(int argc, char *argv[])
@@ -34,7 +35,7 @@ int main(int argc, char *argv[])
 
     /* do some unit tests first */
     rc = do_unittest();
-    if( rc ) {
+    if( rc != VERIFY_SUCCESS ) {
         perror("unit test failed");
         exit(VERIFY_GENERIC_ERROR);
     }
