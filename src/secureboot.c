@@ -11,13 +11,14 @@
 
 #include "include/secureboot.h"
 
-// Keys 
+// Keys
 #include "include/keys.h"
 
 // Support for the openssl for sha and  RSA-PSS verification
 #include <openssl/evp.h>
 #include <openssl/sha.h>
 #include <openssl/rsa.h>
+#include <openssl/ec.h>
 #include <openssl/pem.h>
 #include <openssl/ssl.h>
 #include <openssl/rand.h>
@@ -32,20 +33,20 @@ static int secureboot_memcmp(const void *s1, const void *s2, size_t n);
 /**
  * @brief Helper function to check endianess.
  * @return The function returns 1 if little endian architecture or 0 if big
- *         endian.  
+ *         endian.
  */
 static int check_endian(){
     uint32_t x = 1;
     uint8_t *test = (uint8_t*)&x;
-    return (int)*test; 
+    return (int)*test;
 }
 
 /**
  * @brief Helper function to extract the field from the header.
- * 
+ *
  * TODO: improve readibility internal code style ternary 1 line fits in 80 lines.
  */
-static int getFieldFromHeader(uint8_t *payload, int off) 
+static int getFieldFromHeader(uint8_t *payload, int off)
 {
     return (check_endian())?(payload[off + 3] << 24) + \
                      (payload[off + 2] << 16) + \
@@ -66,7 +67,7 @@ static unsigned int base64_len(size_t len)
 /**
  * @brief Helper function to convert char array to Base64 string.
  *        inspired in https://opensource.apple.com/source/QuickTimeStreamingServer/QuickTimeStreamingServer-452/CommonUtilitiesLib/base64.c
- * @return base64 String  
+ * @return base64 String
  */
 static int hex_to_base64(char *encoded, const unsigned char *string, size_t len)
 {
@@ -102,31 +103,34 @@ static int hex_to_base64(char *encoded, const unsigned char *string, size_t len)
 }
 
 /**
- * @brief Validate the SHA256 of the public key part of the trailer and comparing 
- *        with the reference value in the OTP 
+ * @brief Validate the SHA256 of the public key part of the trailer and comparing
+ *        with the reference value in the OTP
+ *
+ *        Added 'offset' parameter to check multiple public keys in header
  */
 static int
-secureboot_hash_pubkey(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz, 
-                uint8_t *hash_result, int *key_id)
+secureboot_hash_pubkey(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz,
+                uint8_t *hash_result, int *key_id, uint32_t offset)
 {
     SHA256_CTX sha256_ctx;
     uint32_t blk_sz = 0;
     uint32_t size;
     uint32_t off;
+    uint32_t offset_len = offset + 4;
     int rc = VERIFY_GENERIC_ERROR;
 
     // TODO: add sanity check to prevent overrun if size payload + size of image bigger than sizeof(uint32_t)
     SHA256_Init(&sha256_ctx);
     // Hash is computed over public key.
-    size = getFieldFromHeader(payload,OFF_PK_LEN);
+    size = getFieldFromHeader(payload,offset_len);
 
     // for images bigger than 1000 to avoid overflowing tmp buffer
     for (off = 0; off < size; off += blk_sz) {
         blk_sz = size - off;
         if (blk_sz > tmp_buf_sz) {
             blk_sz = tmp_buf_sz;
-        }     
-        memcpy(tmp_buf, payload + getFieldFromHeader(payload, OFF_PK) + OFF_OFF_HDR + off, blk_sz);
+        }
+        memcpy(tmp_buf, payload + getFieldFromHeader(payload, offset) + OFF_OFF_HDR + off, blk_sz);
         SHA256_Update(&sha256_ctx, tmp_buf, blk_sz);
     }
     SHA256_Final(hash_result, &sha256_ctx);
@@ -146,7 +150,7 @@ secureboot_hash_pubkey(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz,
  * @brief Validate the SHA256 of the image including header and body
  */
 static int
-secureboot_hash_image_hdr_body(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz, 
+secureboot_hash_image_hdr_body(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz,
                 uint8_t *hash_result)
 {
     SHA256_CTX sha256_ctx;
@@ -160,14 +164,15 @@ secureboot_hash_image_hdr_body(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_
     // Hash is computed over image header and image itself.
     size = IMAGE_HDR_SZ;
     size += getFieldFromHeader(payload, OFF_IMG_LEN);
-    size += getFieldFromHeader(payload, OFF_PK_LEN);
+    size += getFieldFromHeader(payload, OFF_RSA_PK_LEN);
+    size += getFieldFromHeader(payload, OFF_ECDSA_PK_LEN);
     // for images bigger than 1000 to avoid overflowing tmp buffer
     for (off = 0; off < size; off += blk_sz) {
         blk_sz = size - off;
         if (blk_sz > tmp_buf_sz) {
             blk_sz = tmp_buf_sz;
         }
-        memcpy(tmp_buf, payload + off, blk_sz); 
+        memcpy(tmp_buf, payload + off, blk_sz);
         SHA256_Update(&sha256_ctx, tmp_buf, blk_sz);
     }
     SHA256_Final(hash_result, &sha256_ctx);
@@ -183,7 +188,7 @@ secureboot_hash_image_hdr_body(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_
 
 /**
  * @brief initialize random in openssl
- * 
+ *
  */
 static void init_openssl(void)
 {
@@ -199,31 +204,28 @@ static void init_openssl(void)
 
 /**
  * @brief Implement signature verification based on RSA PSS
- * 
+ *
  */
-static int secureboot_sig_verify_rsa(uint8_t *hash, uint32_t hlen, uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz, 
-  uint8_t key_id)   
+static int secureboot_sig_verify_rsa(uint8_t *hash, uint32_t hlen, uint8_t *payload, uint8_t *tmp_buf,
+        uint32_t tmp_buf_sz, uint8_t key_id)
 {
     int rc = VERIFY_GENERIC_ERROR;
-    RSA *rsa = NULL;
 
     EVP_PKEY *pkey = NULL;
     uint32_t siglen;
     EVP_MD_CTX* rsa_verify_ctx = NULL;
     BIO *bufio;
 
-    init_openssl();
-    
-    siglen = getFieldFromHeader(payload, OFF_SIGN_LEN);
+    siglen = getFieldFromHeader(payload, OFF_RSA_SIGN_LEN);
 
-    if (siglen != SIG_BUF_SZ ){
+    if (siglen != RSA_SIG_BUF_SZ ){
         rc = IMAGE_FORMAT_ERROR;
         goto out;
     }
 
     // TODO: add sanity check to prevent overrun if size payload + size of image bigger than sizeof(uint32_t)
-    memcpy(tmp_buf, payload + getFieldFromHeader(payload, OFF_SIGN) + OFF_OFF_HDR , siglen);
-    LOG_DEBUG("signature", tmp_buf, siglen, true);
+    memcpy(tmp_buf, payload + getFieldFromHeader(payload, OFF_RSA_SIGN) + OFF_OFF_HDR , siglen);
+    LOG_DEBUG("RSA signature", tmp_buf, siglen, true);
     rsa_verify_ctx = EVP_MD_CTX_create();
 
     if ( rsa_verify_ctx == NULL ) {
@@ -232,11 +234,11 @@ static int secureboot_sig_verify_rsa(uint8_t *hash, uint32_t hlen, uint8_t *payl
     }
 
     int pubkeyDER_len = base64_len(*opt_keys[key_id].pk_len);
-   
+
     // Prepare header and footer of public key string
     const char *hdrpubkeyDER = "-----BEGIN PUBLIC KEY-----\n",
-          *fotpubkeyDER = "\n-----END PUBLIC KEY-----"; 
-    const int hdrpubkeyDER_len = strlen(hdrpubkeyDER); 
+          *fotpubkeyDER = "\n-----END PUBLIC KEY-----";
+    const int hdrpubkeyDER_len = strlen(hdrpubkeyDER);
     const size_t biopubkeyDER_len = pubkeyDER_len + CERT_STR_HAF_SZ;
 
     // using only one buffer
@@ -244,19 +246,19 @@ static int secureboot_sig_verify_rsa(uint8_t *hash, uint32_t hlen, uint8_t *payl
     // Copy header of pub key
     strncpy(biopubkeyDER, hdrpubkeyDER, biopubkeyDER_len);
     // Copy body of pub key
-    hex_to_base64(biopubkeyDER + hdrpubkeyDER_len, opt_keys[key_id].pk, 
+    hex_to_base64(biopubkeyDER + hdrpubkeyDER_len, opt_keys[key_id].pk,
             *opt_keys[key_id].pk_len);
     // Copy footer of pub key
     // offset -1 to remove \0 at the end of base64 body
-    strncpy(biopubkeyDER + hdrpubkeyDER_len + pubkeyDER_len - 1, fotpubkeyDER, 
+    strncpy(biopubkeyDER + hdrpubkeyDER_len + pubkeyDER_len - 1, fotpubkeyDER,
             biopubkeyDER_len - hdrpubkeyDER_len - pubkeyDER_len);
     bufio = BIO_new(BIO_s_mem());
-    LOG_DEBUG("Debug Bio Pub Key", biopubkeyDER, pubkeyDER_len+CERT_STR_HAF_SZ, false);
-    int len = BIO_write(bufio, biopubkeyDER, pubkeyDER_len+CERT_STR_HAF_SZ); 
+    LOG_DEBUG("Debug Bio RSA Pub Key", biopubkeyDER, pubkeyDER_len+CERT_STR_HAF_SZ, false);
+    int len = BIO_write(bufio, biopubkeyDER, pubkeyDER_len+CERT_STR_HAF_SZ);
     pkey = PEM_read_bio_PUBKEY(bufio, NULL, NULL, NULL);
     if ( pkey == NULL || len <= 0 ) {
         rc = EVP_PKEY_INIT_ERROR;
-        goto out;
+        goto out_buf;
     }
 
     /* Initialize */
@@ -288,9 +290,6 @@ out:
     if (pkey) {
         EVP_PKEY_free(pkey);
     }
-    if (rsa) {
-        RSA_free(rsa);
-    }
     if (rsa_verify_ctx) {
         EVP_MD_CTX_free(rsa_verify_ctx);
     }
@@ -301,7 +300,7 @@ out:
 /**
  * @brief Challenge: Implement a rollback and update the structures accordingly.
  *
- *        Check if the target image is newer than the current image using version field 
+ *        Check if the target image is newer than the current image using version field
  *        in the image header
  *
  * @return zero if success else nonzero
@@ -319,7 +318,7 @@ static int secureboot_rollback(uint8_t *payload, uint8_t cur_version)
  * @brief Challenge: Replace by a secure implementation of memcmp and replace in the code.
  *
  *        It performs comparisions in constant time to prevent timing attacks.
- *        It checks only if they are same or not and doesn't provide which one is 
+ *        It checks only if they are same or not and doesn't provide which one is
  *        greater or less at the first mismatched chracters unlike memcmp().
  *        All parameters are identical to memcmp().
  *
@@ -343,45 +342,162 @@ static int secureboot_memcmp(const void *s1, const void *s2, size_t n)
  * @brief Challenge: Implement a signature verification supporting Eliptic Curve
  * using openssl primitives and provide a keys.h with example of keys
  */
-static int secureboot_sig_verify_ec()
+static int secureboot_sig_verify_ec(uint8_t *hash, uint32_t hlen, uint8_t *payload, uint8_t *tmp_buf,
+        uint32_t tmp_buf_sz, uint8_t key_id)
 {
-    return 0;
+    int rc = VERIFY_GENERIC_ERROR;
+
+    EVP_PKEY *pkey = NULL;
+    EC_KEY *eckey = NULL;
+    uint32_t siglen;
+    EVP_MD_CTX* ecdsa_verify_ctx = NULL;
+    BIO *bufio;
+
+    // Get the size of ECDSA signature (it's variable length)
+    // TODO: add sanity check to prevent overrun if value in OFF_ECDSA_SIGN_LEN is bigger than the payload size
+    siglen = getFieldFromHeader(payload,
+            getFieldFromHeader(payload, OFF_ECDSA_SIGN_LEN) + OFF_OFF_HDR);
+
+    // Check if it exceeds the maximum size of ECSDA signature (72)
+    if (siglen > ECDSA_SIG_BUF_SZ ){
+        rc = IMAGE_FORMAT_ERROR;
+        goto out;
+    }
+
+    // TODO: add sanity check to prevent overrun if size payload + size of image bigger than sizeof(uint32_t)
+    memcpy(tmp_buf, payload + getFieldFromHeader(payload, OFF_ECDSA_SIGN) + OFF_OFF_HDR , siglen);
+    LOG_DEBUG("ECDSA signature", tmp_buf, siglen, true);
+    ecdsa_verify_ctx = EVP_MD_CTX_create();
+
+    if ( ecdsa_verify_ctx == NULL ) {
+        rc = SSL_CTX_INIT_ERROR;
+        goto out;
+    }
+
+    int pubkeyDER_len = base64_len(*opt_keys[key_id].pk_len);
+
+    // Prepare header and footer of public key string
+    const char *hdrpubkeyDER = "-----BEGIN PUBLIC KEY-----\n",
+          *fotpubkeyDER = "\n-----END PUBLIC KEY-----";
+    const int hdrpubkeyDER_len = strlen(hdrpubkeyDER);
+    const size_t biopubkeyDER_len = pubkeyDER_len + CERT_STR_HAF_SZ;
+
+    // using only one buffer
+    char *biopubkeyDER = malloc(biopubkeyDER_len);
+    // Copy header of pub key
+    strncpy(biopubkeyDER, hdrpubkeyDER, biopubkeyDER_len);
+    // Copy body of pub key
+    hex_to_base64(biopubkeyDER + hdrpubkeyDER_len, opt_keys[key_id].pk,
+            *opt_keys[key_id].pk_len);
+    // Copy footer of pub key
+    // offset -1 to remove \0 at the end of base64 body
+    strncpy(biopubkeyDER + hdrpubkeyDER_len + pubkeyDER_len - 1, fotpubkeyDER,
+            biopubkeyDER_len - hdrpubkeyDER_len - pubkeyDER_len);
+    bufio = BIO_new(BIO_s_mem());
+    LOG_DEBUG("Debug Bio ECDSA Pub Key", biopubkeyDER, pubkeyDER_len+CERT_STR_HAF_SZ, false);
+    int len = BIO_write(bufio, biopubkeyDER, pubkeyDER_len+CERT_STR_HAF_SZ);
+    // Get EC_KEY first
+    eckey = PEM_read_bio_EC_PUBKEY(bufio, NULL, NULL, NULL);
+    if ( eckey == NULL || len <= 0 ) {
+        rc = EVP_PKEY_INIT_ERROR;
+        goto out_buf;
+    }
+    // EC_KEY to EVP_PKEY
+    pkey = EVP_PKEY_new();
+    if( !EVP_PKEY_set1_EC_KEY(pkey, eckey) ) {
+        rc = EVP_PKEY_INIT_ERROR;
+        goto out_buf;
+    }
+
+    /* Initialize */
+    if( !EVP_DigestVerifyInit(ecdsa_verify_ctx, NULL, EVP_sha256(), NULL, pkey) ){
+        rc = VEFIFY_INIT_ERROR;
+        goto out_buf;
+    }
+    /* Update with the hash */
+    if( !EVP_DigestVerifyUpdate(ecdsa_verify_ctx, hash, hlen) ){
+        rc = VEFIFY_UPDATE_ERROR;
+        goto out_buf;
+    }
+    /* Verify with the signature */
+    if( !EVP_DigestVerifyFinal(ecdsa_verify_ctx, tmp_buf, siglen) )
+    {
+        rc = VEFIFY_FINAL_ERROR;
+        goto out_buf;
+    }
+    else
+    {
+        rc = VERIFY_SUCCESS;
+        printf("Verification Success - \t");
+    }
+out_buf:
+    if (biopubkeyDER) {
+        free(biopubkeyDER);
+    }
+out:
+    if (eckey) {
+        EC_KEY_free(eckey);
+    }
+    if (pkey) {
+        EVP_PKEY_free(pkey);
+    }
+    if (ecdsa_verify_ctx) {
+        EVP_MD_CTX_free(ecdsa_verify_ctx);
+    }
+    printf("Return Code(%s) : %x \n", __FUNCTION__, rc);
+    return rc;
 }
 
 /**
  * @brief Validate the image.
- * 
+ *
  */
 int
 secureboot_validate_image(uint8_t *payload, uint8_t *tmp_buf,
                       uint32_t tmp_buf_sz)
 {
-    //int key_id = VERIFY_GENERIC_ERROR;
     uint8_t hash[HASH_SZ];
-    int rc , key_id = VERIFY_GENERIC_ERROR;
- 
-    //validate the hash of the public key with the one stored in the OTP
-    rc = secureboot_hash_pubkey(payload, tmp_buf, tmp_buf_sz, 
-                hash, &key_id);
-    if ( rc ||  0 > key_id || key_id > NUM_PK_OTP ) {
-        // error means that hash of PK not matching ones in the OTP 
-        goto out;
+    int rc;
+
+    // validate the hash of the public key with the one stored in the OTP
+    uint32_t pubkeys[] = { OFF_RSA_PK, OFF_ECDSA_PK };
+    for( size_t i = 0; i < sizeof(pubkeys)/sizeof(uint32_t); ++i ) {
+        int key_id = VERIFY_GENERIC_ERROR;
+        rc = secureboot_hash_pubkey(payload, tmp_buf, tmp_buf_sz,
+                    hash, &key_id, pubkeys[i]);
+        if ( rc ||  0 > key_id || key_id > NUM_PK_OTP ) {
+            // error means that hash of PK not matching ones in the OTP
+            printf("Public Key verification is failed at %zu\n", i );
+            goto out;
+        }
     }
 
-    //validate the hash of the image header and body with the one computed
+    // validate the hash of the image header and body with the one computed
     rc =  secureboot_hash_image_hdr_body(payload, tmp_buf,tmp_buf_sz, hash);
     if (rc) {
         // error means that sha is not done
         printf("Hash verification is failed\n" );
         goto out;
     }
-    
-    // verify the signature of the image with public key
+
+    // Init OpenSSL and random generator
+    init_openssl();
+
+    // verify the signature of the image with RSA public key
     rc = secureboot_sig_verify_rsa(hash, HASH_SZ, payload , tmp_buf,
             tmp_buf_sz, 0);
     if (rc) {
         // error means that verification is incorrect
-        printf("Signature veficiation is failed\n" );
+        printf("RSA Signature verification is failed\n" );
+        goto out;
+    }
+
+    // verify the signature of the image with ECDSA public key
+    rc = secureboot_sig_verify_ec(hash, HASH_SZ, payload , tmp_buf,
+            tmp_buf_sz, 1);
+    if (rc) {
+        // error means that verification is incorrect
+        printf("ECDSA Signature verification is failed\n" );
         goto out;
     }
 
@@ -419,7 +535,7 @@ static inline int _test_memcmp( const struct memcmp_testvectors* tv, size_t tv_c
 {
     clock_t start, end;
     double cpu_time_used;
-    
+
     // do compare test vectors
     for( size_t i = 0; i < tv_count; ++i )
     {
@@ -473,7 +589,7 @@ int secureboot_unittest_memcmp(void)
     printf("- original memcmp() test\n");
     int res = _test_memcmp( tvs, sizeof(tvs) / sizeof(struct memcmp_testvectors), iteration,
             memcmp );
-    
+
     // Test secureboot_memcmp()
     printf("- secureboot_memcmp() test\n");
     res |= _test_memcmp( tvs, sizeof(tvs) / sizeof(struct memcmp_testvectors), iteration,

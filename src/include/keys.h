@@ -16,6 +16,11 @@ const struct opt_key opt_keys[] = {
         .hash_pk = rsa2048_pub_key_hash,
         .pk_len = &rsa2048_pub_key_len,
         .pk = rsa2048_pub_key
+    },
+    {
+        .hash_pk = ecdsa256_pub_key_hash,
+        .pk_len = &ecdsa256_pub_key_len,
+        .pk = ecdsa256_pub_key
     }
 };
 
