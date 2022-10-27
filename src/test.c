@@ -16,6 +16,9 @@ int do_unittest(void)
     int res = secureboot_unittest_memcmp();
     printf( "secureboot_unittest_memcmp() - %d\n", res );
 
+    res |= secureboot_unittest_rollback();
+    printf( "secureboot_unittest_rollback() - %d\n", res );
+
     return res;
 }
 
@@ -23,19 +26,19 @@ int main(int argc, char *argv[])
 {
     uint8_t tmpbuf[TMPBUF_SZ];
     int rc = 0;
-    
+
     if ( argc != 2 ){
         perror("wrong arguments");
         exit(VERIFY_GENERIC_ERROR);
-    } 
-    
+    }
+
     /* do some unit tests first */
     rc = do_unittest();
     if( rc ) {
         perror("unit test failed");
         exit(VERIFY_GENERIC_ERROR);
     }
-    
+
     FILE *in_file = fopen(argv[1], "rb");
     if ( !in_file ){
         perror("fopen");
@@ -60,7 +63,7 @@ int main(int argc, char *argv[])
     rc = secureboot_validate_image(file_content, tmpbuf, TMPBUF_SZ);
 
     assert( rc == VERIFY_SUCCESS);
-    
+
     /* clean and exit */
     free(file_content);
     fclose(in_file);

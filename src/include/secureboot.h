@@ -53,6 +53,7 @@ extern "C" {
 #define VEFIFY_UPDATE_ERROR     0x7FFFFFFA
 #define VEFIFY_FINAL_ERROR      0x7FFFFFF9
 #define IMAGE_FORMAT_ERROR      0x7FFFFFF1
+#define MEMORY_ALLOC_ERROR      0x7FFFFFF2
 
 // Signature buffer size
 #define RSA_SIG_BUF_SZ          256
@@ -103,6 +104,7 @@ int secureboot_validate_image( uint8_t *payload, uint8_t *tmp_buf,
 
 // Unit tests
 int secureboot_unittest_memcmp(void);
+int secureboot_unittest_rollback(void);
 
 #ifdef __cplusplus
 }

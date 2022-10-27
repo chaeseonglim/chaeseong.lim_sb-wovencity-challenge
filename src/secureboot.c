@@ -243,6 +243,11 @@ static int secureboot_sig_verify_rsa(uint8_t *hash, uint32_t hlen, uint8_t *payl
 
     // using only one buffer
     char *biopubkeyDER = malloc(biopubkeyDER_len);
+    if( biopubkeyDER == NULL ) {
+        rc = MEMORY_ALLOC_ERROR;
+        goto out;
+    }
+
     // Copy header of pub key
     strncpy(biopubkeyDER, hdrpubkeyDER, biopubkeyDER_len);
     // Copy body of pub key
@@ -355,8 +360,8 @@ static int secureboot_sig_verify_ec(uint8_t *hash, uint32_t hlen, uint8_t *paylo
 
     // Get the size of ECDSA signature (it's variable length)
     // TODO: add sanity check to prevent overrun if value in OFF_ECDSA_SIGN_LEN is bigger than the payload size
-    siglen = getFieldFromHeader(payload,
-            getFieldFromHeader(payload, OFF_ECDSA_SIGN_LEN) + OFF_OFF_HDR);
+    siglen = getFieldFromHeader(payload, getFieldFromHeader(payload, OFF_ECDSA_SIGN_LEN) +
+            OFF_OFF_HDR);
 
     // Check if it exceeds the maximum size of ECSDA signature (72)
     if (siglen > ECDSA_SIG_BUF_SZ ){
@@ -384,6 +389,10 @@ static int secureboot_sig_verify_ec(uint8_t *hash, uint32_t hlen, uint8_t *paylo
 
     // using only one buffer
     char *biopubkeyDER = malloc(biopubkeyDER_len);
+    if( biopubkeyDER == NULL ) {
+        rc = MEMORY_ALLOC_ERROR;
+        goto out;
+    }
     // Copy header of pub key
     strncpy(biopubkeyDER, hdrpubkeyDER, biopubkeyDER_len);
     // Copy body of pub key
@@ -596,4 +605,26 @@ int secureboot_unittest_memcmp(void)
             secureboot_memcmp );
 
     return res;
+}
+
+/**
+ * @brief Unit test for secureboot_rollback()
+ *
+ * @return zero if success else nonzero
+ */
+int secureboot_unittest_rollback(void)
+{
+    // Prepare the test vectors which contain possible versions of the image.
+    const uint32_t tvs[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+
+    for( size_t i = 0; i < sizeof(tvs)/sizeof(uint32_t); ++i ) {
+        struct img_hdr hdr = { IMAGE_MAGIC, tvs[i] };
+
+        int rc = secureboot_rollback((uint8_t *)&hdr, EMBEDDED_VERSION);
+        if( ( !rc && tvs[i] <= EMBEDDED_VERSION ) || ( rc && tvs[i] > EMBEDDED_VERSION ) ) {
+            return -1;
+        }
+    }
+
+    return 0;
 }
