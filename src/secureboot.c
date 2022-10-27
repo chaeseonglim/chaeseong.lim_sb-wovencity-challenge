@@ -375,21 +375,56 @@ out:
  *****************************************************************************/
 
 /**
- * @brief Structure used for secureboot_unittest_memcmp()
+ * @brief Structure contains testvectors used in secureboot_unittest_memcmp()
  */
-struct str_pair
+struct memcmp_testvectors
 {
     const char* s1;
     const char* s2;
 };
 
+static inline int _test_memcmp( const struct memcmp_testvectors* tv, int tv_count, int iteration,
+        int (*cmp)(const void* s1, const void* s2, size_t n) )
+{
+    clock_t start, end;
+    double cpu_time_used;
+    
+    // do compare test vectors
+    for( size_t i = 0; i < tv_count; ++i )
+    {
+        start = clock();
+
+        for( size_t j = 0; j < iteration; ++j ) {
+            // prevent being optimized out
+            volatile int res = (*cmp)( tv[i].s1, tv[i].s2, strlen( tv[i].s2 ) );
+        }
+
+        end = clock();
+        cpu_time_used = ( (double) (end - start) ) / CLOCKS_PER_SEC;
+
+        if( i > 0 ) {
+            // Exclude the first run from the result to minimize impact of cache.
+            // Maybe we can drop caches before every run but it might be platform dependent.
+            printf( "%d-th test: %f sec\n", i, cpu_time_used );
+        }
+    }
+
+    // No criteria for this test.
+    // A pass/fail condition may be varied depends on the platform/HW.
+    return 1;
+}
+
 /**
  * @brief Unit test for secureboot_memcmp()
+ *
+ * @return 1 if success else 0
  */
 int secureboot_unittest_memcmp(void)
 {
-    // Prepare the sample string pairs which has zero or one difference between them.
-    const struct str_pair pairs[] = {
+    // Prepare the test vectors which have zero or single difference between the pair.
+    const struct memcmp_testvectors tvs[] = {
+        { "A123456789123456789123456789123456789123456789",
+          "A123456789123456789123456789123456789123456789" }, // same
         { "A123456789123456789123456789123456789123456789",
           "A123456789123456789123456789123456789123456789" }, // same
         { "B123456789123456789123456789123456789123456789",
@@ -400,44 +435,17 @@ int secureboot_unittest_memcmp(void)
           "D123456789123456789123456789123456789123456780" }, // the last ch
     };
 
-    const int test_iteration = 1000;
-    clock_t start, end;
-    double cpu_time_used;
+    const int iteration = 1000;
 
-    // Check the duration of original memcmp() with sample string pairs.
-    for( size_t i = 0; i < sizeof(pairs) / sizeof(struct str_pair); ++i )
-    {
-        start = clock();
+    // Test original memcmp()
+    printf("- original memcmp() test\n");
+    int res = _test_memcmp( tvs, sizeof(tvs) / sizeof(struct memcmp_testvectors), iteration,
+            memcmp );
+    
+    // Test secureboot_memcmp()
+    printf("- secureboot_memcmp() test\n");
+    res &= _test_memcmp( tvs, sizeof(tvs) / sizeof(struct memcmp_testvectors), iteration,
+            secureboot_memcmp );
 
-        for( size_t j = 0; j < test_iteration; ++j ) {
-            // prevent being optimized out
-            volatile int res = memcmp( pairs[i].s1, pairs[i].s2, strlen( pairs[i].s2 ) );
-        }
-
-        end = clock();
-        cpu_time_used = ( (double) (end - start) ) / CLOCKS_PER_SEC;
-
-        printf( "memcmp - %d-th test: %f sec\n", i + 1, cpu_time_used );
-    }
-
-    // Check the duration of secureboot_memcmp() with sample string pairs.
-    for( size_t i = 0; i < sizeof(pairs) / sizeof(struct str_pair); ++i )
-    {
-        start = clock();
-
-        for( size_t j = 0; j < test_iteration; ++j ) {
-            // do secureboot_memcmp()
-            // prevent being optimized out
-            volatile int res = secureboot_memcmp( pairs[i].s1, pairs[i].s2, strlen( pairs[i].s2 ) );
-        }
-
-        end = clock();
-        cpu_time_used = ( (double) (end - start) ) / CLOCKS_PER_SEC;
-
-        printf( "secureboot_memcmp - %d-th test: %f sec\n", i + 1, cpu_time_used );
-    }
-
-    // No hard decision for this test yet.
-    // A pass/fail condition can be different depends on the platform/HW.
-    return 1;
+    return res;
 }

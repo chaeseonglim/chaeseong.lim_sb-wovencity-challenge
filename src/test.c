@@ -5,11 +5,28 @@
 #include <assert.h>
 #include "include/secureboot.h"
 
+/**
+ * @brief Do unit tests for newly added implementations.
+ *
+ * @return 1 if successful else 0
+ */
+int do_unittest(void)
+{
+    // secureboot_memcmp()
+    int res = secureboot_unittest_memcmp();
+    printf( "secureboot_unittest_memcmp() - %d\n", res );
+
+    return res;
+}
+
 int main(int argc, char *argv[])
 {
     /* do some unit tests first */
-    int res = secureboot_unittest_memcmp();
-    printf( "secureboot_unittest_memcmp() - %d\n", res );
+    if( !do_unittest() )
+    {
+        perror("unit test failed");
+        exit(VERIFY_GENERIC_ERROR);
+    }
 
     uint8_t tmpbuf[TMPBUF_SZ];
     int rc = 0;
