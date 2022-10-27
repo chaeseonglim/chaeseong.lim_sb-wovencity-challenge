@@ -82,6 +82,8 @@ struct img_hdr {
 int secureboot_validate_image( uint8_t *payload, uint8_t *tmp_buf, 
                       uint32_t tmp_buf_sz);
 
+int secureboot_unittest_memcmp(void);
+
 #ifdef __cplusplus
 }
 #endif

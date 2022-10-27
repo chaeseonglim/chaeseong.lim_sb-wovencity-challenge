@@ -7,6 +7,10 @@
 
 int main(int argc, char *argv[])
 {
+    /* do some unit tests first */
+    int res = secureboot_unittest_memcmp();
+    printf( "secureboot_unittest_memcmp() - %d\n", res );
+
     uint8_t tmpbuf[TMPBUF_SZ];
     int rc = 0;
     

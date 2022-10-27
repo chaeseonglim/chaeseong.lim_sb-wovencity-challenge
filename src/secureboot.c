@@ -6,6 +6,8 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <time.h>
+#include <string.h>
 
 #include "include/secureboot.h"
 
@@ -22,6 +24,9 @@
 
 // Future Support for the TLV structure in the trailer instead of info in header
 #include "include/tlv.h"
+
+/* Forward declarations */
+static int secureboot_memcmp(const void *s1, const void *s2, size_t n);
 
 /**
  * @brief Helper function to check endianess.
@@ -125,7 +130,7 @@ secureboot_hash_pubkey(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz,
     }
     SHA256_Final(hash_result, &sha256_ctx);
     for ( int cnt = 0; cnt < NUM_PK_OTP; cnt++){
-        if ( ! memcmp(hash_result, opt_keys[cnt].hash_pk, HASH_SZ) ){
+        if ( ! secureboot_memcmp(hash_result, opt_keys[cnt].hash_pk, HASH_SZ) ){
             LOG_DEBUG("public key digest is correct", hash_result, HASH_SZ, true);
             (void)sha256_ctx;
             *key_id = cnt;
@@ -166,7 +171,7 @@ secureboot_hash_image_hdr_body(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_
     }
     SHA256_Final(hash_result, &sha256_ctx);
     memcpy(tmp_buf, payload + getFieldFromHeader(payload, OFF_HASH) + 1, HASH_SZ );
-    if ( ! memcmp(hash_result, tmp_buf , HASH_SZ) ){
+    if ( ! secureboot_memcmp(hash_result, tmp_buf , HASH_SZ) ){
         LOG_DEBUG("hash of header + body + public key is correct", hash_result, HASH_SZ, true);
         rc = VERIFY_SUCCESS;
     }
@@ -245,26 +250,31 @@ static int secureboot_sig_verify_rsa(uint8_t *hash, uint32_t hlen, uint8_t *payl
     /* Initialize */
     if( !EVP_DigestVerifyInit(rsa_verify_ctx, NULL, EVP_sha256(), NULL, pkey) ){
         rc = VEFIFY_INIT_ERROR;
-        goto out;
+        goto out_buf;
     }
     /* Update with the hash */
     if( !EVP_DigestVerifyUpdate(rsa_verify_ctx, hash, hlen) ){
         rc = VEFIFY_UPDATE_ERROR;
-        goto out;
+        goto out_buf;
     }
     /* Verify with the signature */
     if( !EVP_DigestVerifyFinal(rsa_verify_ctx, tmp_buf, siglen) )
     {
         rc = VEFIFY_FINAL_ERROR;
-        goto out;
+        goto out_buf;
     }
     else
     {
         rc = VERIFY_SUCCESS;
         printf("Verification Success - \t");
     }
-    free(pubkeyDERformat);
-    free(biopubkeyDER);
+out_buf:
+    if (pubkeyDERformat) {
+        free(pubkeyDERformat);
+    }
+    if (biopubkeyDER) {
+        free(biopubkeyDER);
+    }
 out:
     if (pkey) {
         EVP_PKEY_free(pkey);
@@ -291,11 +301,24 @@ static int secureboot_rollback()
 /**
  * @brief Challenge: Replace by a secure implementation of memcmp and replace in the code.
  * 
+ * @return nonzero if s1 and s2 is different else zero
+ *         It doesn't provide which one is greater or less unlike original memcmp.
  */
-static int secureboot_memcmp()
+static int secureboot_memcmp(const void *s1, const void *s2, size_t n)
 {
-    return 0;
+    // Perform comparisions in constant time to prevent timing attacks.
+    // Inspired by https://security.stackexchange.com/questions/160808/why-should-memcmp-not-be-used-to-compare-security-critical-data
+
+    int result = 0;
+    for( size_t i = 0; i < n; ++i ) {
+        // Ensure it consumes the same number of cycles whether they match or not.
+        result |= (int) ( *( (const char*)s1 + i ) - *( (const char*)s2 + i ) );
+
+        // And never break during the loop...
+    }
+    return result;
 }
+
 /**
  * @brief Challenge: Implement a signature verification supporting Eliptic Curve
  * using openssl primitives and provide a keys.h with example of keys
@@ -310,7 +333,7 @@ static int secureboot_sig_verify_ec()
  * 
  */
 int
-secureboot_validate_image( uint8_t *payload, uint8_t *tmp_buf, 
+secureboot_validate_image(uint8_t *payload, uint8_t *tmp_buf,
                       uint32_t tmp_buf_sz)
 {
     //int key_id = VERIFY_GENERIC_ERROR;
@@ -344,4 +367,77 @@ out:
        printf("Error validate the signature %x ", rc);
     }
     return rc;
+}
+
+
+/******************************************************************************
+ * Unit tests for the challange
+ *****************************************************************************/
+
+/**
+ * @brief Structure used for secureboot_unittest_memcmp()
+ */
+struct str_pair
+{
+    const char* s1;
+    const char* s2;
+};
+
+/**
+ * @brief Unit test for secureboot_memcmp()
+ */
+int secureboot_unittest_memcmp(void)
+{
+    // Prepare the sample string pairs which has zero or one difference between them.
+    const struct str_pair pairs[] = {
+        { "A123456789123456789123456789123456789123456789",
+          "A123456789123456789123456789123456789123456789" }, // same
+        { "B123456789123456789123456789123456789123456789",
+          "B123456089123456789123456789123456789123456789" }, // 8-th ch
+        { "C123456789123456789123456789123456789123456789",
+          "C123456789123456089123456789123456789123456789" }, // 17-th ch
+        { "D123456789123456789123456789123456789123456789",
+          "D123456789123456789123456789123456789123456780" }, // the last ch
+    };
+
+    const int test_iteration = 1000;
+    clock_t start, end;
+    double cpu_time_used;
+
+    // Check the duration of original memcmp() with sample string pairs.
+    for( size_t i = 0; i < sizeof(pairs) / sizeof(struct str_pair); ++i )
+    {
+        start = clock();
+
+        for( size_t j = 0; j < test_iteration; ++j ) {
+            // prevent being optimized out
+            volatile int res = memcmp( pairs[i].s1, pairs[i].s2, strlen( pairs[i].s2 ) );
+        }
+
+        end = clock();
+        cpu_time_used = ( (double) (end - start) ) / CLOCKS_PER_SEC;
+
+        printf( "memcmp - %d-th test: %f sec\n", i + 1, cpu_time_used );
+    }
+
+    // Check the duration of secureboot_memcmp() with sample string pairs.
+    for( size_t i = 0; i < sizeof(pairs) / sizeof(struct str_pair); ++i )
+    {
+        start = clock();
+
+        for( size_t j = 0; j < test_iteration; ++j ) {
+            // do secureboot_memcmp()
+            // prevent being optimized out
+            volatile int res = secureboot_memcmp( pairs[i].s1, pairs[i].s2, strlen( pairs[i].s2 ) );
+        }
+
+        end = clock();
+        cpu_time_used = ( (double) (end - start) ) / CLOCKS_PER_SEC;
+
+        printf( "secureboot_memcmp - %d-th test: %f sec\n", i + 1, cpu_time_used );
+    }
+
+    // No hard decision for this test yet.
+    // A pass/fail condition can be different depends on the platform/HW.
+    return 1;
 }
