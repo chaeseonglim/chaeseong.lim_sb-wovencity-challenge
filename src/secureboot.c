@@ -383,7 +383,7 @@ struct memcmp_testvectors
     const char* s2;
 };
 
-static inline int _test_memcmp( const struct memcmp_testvectors* tv, int tv_count, int iteration,
+static inline int _test_memcmp( const struct memcmp_testvectors* tv, int tv_count, size_t iteration,
         int (*cmp)(const void* s1, const void* s2, size_t n) )
 {
     clock_t start, end;
@@ -397,6 +397,8 @@ static inline int _test_memcmp( const struct memcmp_testvectors* tv, int tv_coun
         for( size_t j = 0; j < iteration; ++j ) {
             // prevent being optimized out
             volatile int res = (*cmp)( tv[i].s1, tv[i].s2, strlen( tv[i].s2 ) );
+
+            (void) res;
         }
 
         end = clock();
@@ -405,7 +407,7 @@ static inline int _test_memcmp( const struct memcmp_testvectors* tv, int tv_coun
         if( i > 0 ) {
             // Exclude the first run from the result to minimize impact of cache.
             // Maybe we can drop caches before every run but it might be platform dependent.
-            printf( "%d-th test: %f sec\n", i, cpu_time_used );
+            printf( "%zu-th test: %f sec\n", i, cpu_time_used );
         }
     }
 
@@ -435,7 +437,7 @@ int secureboot_unittest_memcmp(void)
           "D123456789123456789123456789123456789123456780" }, // the last ch
     };
 
-    const int iteration = 1000;
+    const size_t iteration = 1000;
 
     // Test original memcmp()
     printf("- original memcmp() test\n");
