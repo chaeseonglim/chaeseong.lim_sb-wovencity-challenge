@@ -9,6 +9,8 @@ SRCDIR=src
 #TODO support multiple samples
 SAMPLE_TEST=$(SAMPLE_FOLDER)/$(SAMPLE_NAME)1
 SAMPLE_SIGNED=$(RUN_FOLDER)/$(SAMPLE_NAME)_signed
+# set image version to 6 as default
+IMAGE_VERSION=6
 
 SRC=$(wildcard $(SRCDIR)/*.c)
 OBJ=$(patsubst $(SRCDIR)/%.c, $(BUILDDIR)/%.o, $(SRC))
@@ -34,9 +36,9 @@ $(SAMPLE_TEST).o: $(SAMPLE_TEST).c
 $(SAMPLE_TEST): $(SAMPLE_TEST).o
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $(SAMPLE_TEST) $<
 
-# sign the sample image
+# sign the sample image 
 build_sign_sample_image:
-	python3 $(SCRIPT_FOLDER)/image.py $(RUN_FOLDER) $(SAMPLE_TEST)
+	python3 $(SCRIPT_FOLDER)/image.py $(RUN_FOLDER) $(SAMPLE_TEST) $(IMAGE_VERSION)
 
 # test that new generated keys works well with openssl
 test_sign_keypair:

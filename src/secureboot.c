@@ -26,6 +26,7 @@
 #include "include/tlv.h"
 
 /* Forward declarations */
+static int secureboot_rollback(uint8_t *payload, uint8_t cur_version);
 static int secureboot_memcmp(const void *s1, const void *s2, size_t n);
 
 /**
@@ -125,7 +126,7 @@ secureboot_hash_pubkey(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz,
         if (blk_sz > tmp_buf_sz) {
             blk_sz = tmp_buf_sz;
         }     
-        memcpy(tmp_buf, payload + getFieldFromHeader(payload, OFF_PK) + 1, blk_sz);
+        memcpy(tmp_buf, payload + getFieldFromHeader(payload, OFF_PK) + OFF_OFF_HDR + off, blk_sz);
         SHA256_Update(&sha256_ctx, tmp_buf, blk_sz);
     }
     SHA256_Final(hash_result, &sha256_ctx);
@@ -170,7 +171,7 @@ secureboot_hash_image_hdr_body(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_
         SHA256_Update(&sha256_ctx, tmp_buf, blk_sz);
     }
     SHA256_Final(hash_result, &sha256_ctx);
-    memcpy(tmp_buf, payload + getFieldFromHeader(payload, OFF_HASH) + 1, HASH_SZ );
+    memcpy(tmp_buf, payload + getFieldFromHeader(payload, OFF_HASH) + OFF_OFF_HDR, HASH_SZ );
     if ( ! secureboot_memcmp(hash_result, tmp_buf , HASH_SZ) ){
         LOG_DEBUG("hash of header + body + public key is correct", hash_result, HASH_SZ, true);
         rc = VERIFY_SUCCESS;
@@ -221,7 +222,7 @@ static int secureboot_sig_verify_rsa(uint8_t *hash, uint32_t hlen, uint8_t *payl
     }
 
     // TODO: add sanity check to prevent overrun if size payload + size of image bigger than sizeof(uint32_t)
-    memcpy(tmp_buf, payload + getFieldFromHeader(payload, OFF_SIGN) + 1 , siglen);
+    memcpy(tmp_buf, payload + getFieldFromHeader(payload, OFF_SIGN) + OFF_OFF_HDR , siglen);
     LOG_DEBUG("signature", tmp_buf, siglen, true);
     rsa_verify_ctx = EVP_MD_CTX_create();
 
@@ -231,13 +232,24 @@ static int secureboot_sig_verify_rsa(uint8_t *hash, uint32_t hlen, uint8_t *payl
     }
 
     int pubkeyDER_len = base64_len(*opt_keys[key_id].pk_len);
-    //TODO improve only one buffer 
-    char *pubkeyDERformat= malloc(pubkeyDER_len);
-    char *biopubkeyDER= malloc(pubkeyDER_len+CERT_STR_HAF_SZ);
-    hex_to_base64(pubkeyDERformat, opt_keys[key_id].pk, *opt_keys[key_id].pk_len);
-    snprintf(biopubkeyDER, pubkeyDER_len+CERT_STR_HAF_SZ ,
-            "-----BEGIN PUBLIC KEY-----\n%s\n-----END PUBLIC KEY-----", 
-            pubkeyDERformat);
+   
+    // Prepare header and footer of public key string
+    const char *hdrpubkeyDER = "-----BEGIN PUBLIC KEY-----\n",
+          *fotpubkeyDER = "\n-----END PUBLIC KEY-----"; 
+    const int hdrpubkeyDER_len = strlen(hdrpubkeyDER); 
+    const size_t biopubkeyDER_len = pubkeyDER_len + CERT_STR_HAF_SZ;
+
+    // using only one buffer
+    char *biopubkeyDER = malloc(biopubkeyDER_len);
+    // Copy header of pub key
+    strncpy(biopubkeyDER, hdrpubkeyDER, biopubkeyDER_len);
+    // Copy body of pub key
+    hex_to_base64(biopubkeyDER + hdrpubkeyDER_len, opt_keys[key_id].pk, 
+            *opt_keys[key_id].pk_len);
+    // Copy footer of pub key
+    // offset -1 to remove \0 at the end of base64 body
+    strncpy(biopubkeyDER + hdrpubkeyDER_len + pubkeyDER_len - 1, fotpubkeyDER, 
+            biopubkeyDER_len - hdrpubkeyDER_len - pubkeyDER_len);
     bufio = BIO_new(BIO_s_mem());
     LOG_DEBUG("Debug Bio Pub Key", biopubkeyDER, pubkeyDER_len+CERT_STR_HAF_SZ, false);
     int len = BIO_write(bufio, biopubkeyDER, pubkeyDER_len+CERT_STR_HAF_SZ); 
@@ -269,9 +281,6 @@ static int secureboot_sig_verify_rsa(uint8_t *hash, uint32_t hlen, uint8_t *payl
         printf("Verification Success - \t");
     }
 out_buf:
-    if (pubkeyDERformat) {
-        free(pubkeyDERformat);
-    }
     if (biopubkeyDER) {
         free(biopubkeyDER);
     }
@@ -291,32 +300,43 @@ out:
 
 /**
  * @brief Challenge: Implement a rollback and update the structures accordingly.
- * 
+ *
+ *        Check if the target image is newer than the current image using version field 
+ *        in the image header
+ *
+ * @return zero if success else nonzero
  */
-static int secureboot_rollback()
+static int secureboot_rollback(uint8_t *payload, uint8_t cur_version)
 {
-    return 0;
+    // Extract version from the header
+    int version = getFieldFromHeader(payload, OFF_VERSION);
+
+    // Assumes always use the latest version and rollback is never allowed.
+    return !(cur_version < version);
 }
 
 /**
  * @brief Challenge: Replace by a secure implementation of memcmp and replace in the code.
- * 
+ *
+ *        It performs comparisions in constant time to prevent timing attacks.
+ *        It checks only if they are same or not and doesn't provide which one is 
+ *        greater or less at the first mismatched chracters unlike memcmp().
+ *        All parameters are identical to memcmp().
+ *
+ *        Inspired by https://security.stackexchange.com/questions/160808/why-should-memcmp-not-be-used-to-compare-security-critical-data
+ *
  * @return nonzero if s1 and s2 is different else zero
- *         It doesn't provide which one is greater or less unlike original memcmp.
  */
 static int secureboot_memcmp(const void *s1, const void *s2, size_t n)
 {
-    // Perform comparisions in constant time to prevent timing attacks.
-    // Inspired by https://security.stackexchange.com/questions/160808/why-should-memcmp-not-be-used-to-compare-security-critical-data
-
-    int result = 0;
+    int rc = 0;
     for( size_t i = 0; i < n; ++i ) {
-        // Ensure it consumes the same number of cycles whether they match or not.
-        result |= (int) ( *( (const char*)s1 + i ) - *( (const char*)s2 + i ) );
+        // Make it runs at the same number of cycles whether they match or not.
+        rc |= (int) ( *( (const char*)s1 + i ) - *( (const char*)s2 + i ) );
 
-        // And never break during the loop...
+        // Go till the end of buffers
     }
-    return result;
+    return rc;
 }
 
 /**
@@ -347,10 +367,12 @@ secureboot_validate_image(uint8_t *payload, uint8_t *tmp_buf,
         // error means that hash of PK not matching ones in the OTP 
         goto out;
     }
+
     //validate the hash of the image header and body with the one computed
     rc =  secureboot_hash_image_hdr_body(payload, tmp_buf,tmp_buf_sz, hash);
     if (rc) {
         // error means that sha is not done
+        printf("Hash verification is failed\n" );
         goto out;
     }
     
@@ -359,6 +381,15 @@ secureboot_validate_image(uint8_t *payload, uint8_t *tmp_buf,
             tmp_buf_sz, 0);
     if (rc) {
         // error means that verification is incorrect
+        printf("Signature veficiation is failed\n" );
+        goto out;
+    }
+
+    // verify the image version is not an old one
+    rc = secureboot_rollback(payload, EMBEDDED_VERSION);
+    if (rc) {
+        // error means that the version of payload is deprecated
+        printf("Image rollback is detected\n" );
         goto out;
     }
 
@@ -383,7 +414,7 @@ struct memcmp_testvectors
     const char* s2;
 };
 
-static inline int _test_memcmp( const struct memcmp_testvectors* tv, int tv_count, size_t iteration,
+static inline int _test_memcmp( const struct memcmp_testvectors* tv, size_t tv_count, size_t iteration,
         int (*cmp)(const void* s1, const void* s2, size_t n) )
 {
     clock_t start, end;
@@ -397,7 +428,6 @@ static inline int _test_memcmp( const struct memcmp_testvectors* tv, int tv_coun
         for( size_t j = 0; j < iteration; ++j ) {
             // prevent being optimized out
             volatile int res = (*cmp)( tv[i].s1, tv[i].s2, strlen( tv[i].s2 ) );
-
             (void) res;
         }
 
@@ -413,13 +443,13 @@ static inline int _test_memcmp( const struct memcmp_testvectors* tv, int tv_coun
 
     // No criteria for this test.
     // A pass/fail condition may be varied depends on the platform/HW.
-    return 1;
+    return 0;
 }
 
 /**
  * @brief Unit test for secureboot_memcmp()
  *
- * @return 1 if success else 0
+ * @return zero if success else nonzero
  */
 int secureboot_unittest_memcmp(void)
 {
@@ -428,7 +458,7 @@ int secureboot_unittest_memcmp(void)
         { "A123456789123456789123456789123456789123456789",
           "A123456789123456789123456789123456789123456789" }, // same
         { "A123456789123456789123456789123456789123456789",
-          "A123456789123456789123456789123456789123456789" }, // same
+          "A123456789123456789123456789123456789123456789" }, // same as intended
         { "B123456789123456789123456789123456789123456789",
           "B123456089123456789123456789123456789123456789" }, // 8-th ch
         { "C123456789123456789123456789123456789123456789",
@@ -446,7 +476,7 @@ int secureboot_unittest_memcmp(void)
     
     // Test secureboot_memcmp()
     printf("- secureboot_memcmp() test\n");
-    res &= _test_memcmp( tvs, sizeof(tvs) / sizeof(struct memcmp_testvectors), iteration,
+    res |= _test_memcmp( tvs, sizeof(tvs) / sizeof(struct memcmp_testvectors), iteration,
             secureboot_memcmp );
 
     return res;

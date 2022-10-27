@@ -25,14 +25,19 @@ extern "C" {
 #endif
 
 // TODO improve naming because it is better for readibility.
-#define OFF_IMG         4                   /* Image offset to image body offset*/
+#define OFF_VERSION     4                   /* Image version */
+#define OFF_IMG         (OFF_VERSION) + 4   /* Image offset to image body offset*/
 #define OFF_IMG_LEN     (OFF_IMG) + 4       /* Image body length */
 #define OFF_PK          (OFF_IMG_LEN) + 4   /* Image offset to Public key offset */
 #define OFF_PK_LEN      (OFF_PK) + 4        /* Public Key length  */
 #define OFF_HASH        (OFF_PK_LEN) + 4    /* Image offset to Public key offset */
 #define OFF_HASH_LEN    (OFF_HASH) + 4      /* Public Key length  */
 #define OFF_SIGN        (OFF_HASH_LEN) + 4  /* Image offset to signature offset */
-#define OFF_SIGN_LEN    (OFF_SIGN) + 4      /* signature length  */
+#define OFF_SIGN_LEN    (OFF_SIGN) + 4      /* Signature length  */
+
+// The "offset" for offset field in the header (in bytes)
+// Offset + Magic(1) + Version(1)
+#define OFF_OFF_HDR     (2)
 
 // Error Codes
 #define VERIFY_SUCCESS          0
@@ -63,9 +68,14 @@ extern "C" {
 // Number of hash of Public key in the OTP
 #define NUM_PK_OTP    1
 
+// Version supposed to be embedded in NVM memory such as OTP, flash etc
+// Assumes the current installed version is 5
+#define EMBEDDED_VERSION    5
+
 // Used in the old implementation based on TLV
 struct img_hdr {
     uint32_t ih_magic;
+    uint32_t version;       /* version of the image */
     uint32_t image_off;     /* offset to the image  */
     uint32_t image_len;     /* Size of image (in bytes). */
     uint32_t pk_off;        /* offset to the public key  */
@@ -82,6 +92,7 @@ struct img_hdr {
 int secureboot_validate_image( uint8_t *payload, uint8_t *tmp_buf, 
                       uint32_t tmp_buf_sz);
 
+// Unit tests
 int secureboot_unittest_memcmp(void);
 
 #ifdef __cplusplus

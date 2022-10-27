@@ -8,11 +8,11 @@
 /**
  * @brief Do unit tests for newly added implementations.
  *
- * @return 1 if successful else 0
+ * @return zero if successful else nonzero
  */
 int do_unittest(void)
 {
-    // secureboot_memcmp()
+    // Test secureboot_memcmp()
     int res = secureboot_unittest_memcmp();
     printf( "secureboot_unittest_memcmp() - %d\n", res );
 
@@ -21,13 +21,6 @@ int do_unittest(void)
 
 int main(int argc, char *argv[])
 {
-    /* do some unit tests first */
-    if( !do_unittest() )
-    {
-        perror("unit test failed");
-        exit(VERIFY_GENERIC_ERROR);
-    }
-
     uint8_t tmpbuf[TMPBUF_SZ];
     int rc = 0;
     
@@ -35,6 +28,13 @@ int main(int argc, char *argv[])
         perror("wrong arguments");
         exit(VERIFY_GENERIC_ERROR);
     } 
+    
+    /* do some unit tests first */
+    rc = do_unittest();
+    if( rc ) {
+        perror("unit test failed");
+        exit(VERIFY_GENERIC_ERROR);
+    }
     
     FILE *in_file = fopen(argv[1], "rb");
     if ( !in_file ){

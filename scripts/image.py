@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
 
 IMAGE_MAGIC = "28FEB8C6"
-IMAGE_HEADER_SIZE = 36
+IMAGE_HEADER_SIZE = 40
 HASH_SIZE = 32
 SIGN_SIZE = 256
 E_VALUE = pow(2,16)+1
@@ -123,17 +123,18 @@ class Image():
         else:
             key = self.public_key
 
-
+        # Refer to include/secureboot.h for the header structure
         self.img_payload = bytes.fromhex(IMAGE_MAGIC) + \
-                  (IMAGE_HEADER_SIZE - 1).to_bytes(4, byteorder = self.endian) + \
+                  int(self.version).to_bytes(4, byteorder = self.endian) + \
+                  (IMAGE_HEADER_SIZE - 2).to_bytes(4, byteorder = self.endian) + \
                   (len(self.img_payload)).to_bytes(4, byteorder = self.endian) + \
-                  (IMAGE_HEADER_SIZE - 1 + len(self.img_payload)).to_bytes(4, byteorder = self.endian) + \
+                  (IMAGE_HEADER_SIZE - 2 + len(self.img_payload)).to_bytes(4, byteorder = self.endian) + \
                   (len(key)).to_bytes(4, byteorder = self.endian) + \
-                  (IMAGE_HEADER_SIZE - 1 + len(self.img_payload) + len(key) ).to_bytes(4, byteorder = self.endian) + \
+                  (IMAGE_HEADER_SIZE - 2 + len(self.img_payload) + len(key) ).to_bytes(4, byteorder = self.endian) + \
                   (32).to_bytes(4, byteorder = self.endian) + \
-                  (IMAGE_HEADER_SIZE - 1 + len(self.img_payload) + 32 + len(key)).to_bytes(4, byteorder = self.endian) + \
+                  (IMAGE_HEADER_SIZE - 2 + len(self.img_payload) + 32 + len(key)).to_bytes(4, byteorder = self.endian) + \
                   (SIGN_SIZE).to_bytes(4, byteorder = self.endian) + \
-                  self.img_payload 
+                  self.img_payload
 
         digest = SHA256.new(self.img_payload + key )
         logging.debug("header + image digest= {}".format(digest.hexdigest()))
@@ -240,13 +241,14 @@ def main():
 
     try:
         n = len(sys.argv)
-        if n != 3:
+        if n != 4:
             raise ValueError("Expected at 3 arguments")
         else:
             run_path=sys.argv[1] # path to private key
             samples_path=sys.argv[2] # path to sample test image
+            version=int(sys.argv[3]) # image version
         #TODO investigate the PSS mode in hazmat and PSS/PKCS1_v15 in pycryptodome
-        img = Image()
+        img = Image(version=version)
         img.load(samples_path)
         pp = sep.join([run_path, KEY_PAIR_NAME])
         img.getPublicKey(sep.join([run_path, KEY_PAIR_NAME]))
