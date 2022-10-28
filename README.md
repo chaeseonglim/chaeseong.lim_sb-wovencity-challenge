@@ -64,6 +64,11 @@ export CPPFLAGS=-I/opt/homebrew/opt/openssl@3/include
 pip install -r scripts/requirement.txt
 ```
 
+> **_NOTE:_**
+> RSA signing of pycryptodome in image.py doesn't work for some reasons even for the original code.
+> I have been trying to debug it but couldn't find a clue.
+> So I have tested with hazmat=True for the challenge.
+
 ## Protections against rollback
 
 ### Problem
