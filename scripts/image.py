@@ -278,7 +278,6 @@ class Image():
         except TypeError:
             raise click.UsageError("signature process fails")
 
-        print(len(self.rsa_signature))
         with open(out_path, 'wb') as f:
             f.write(self.img_payload + rsa_key + ecdsa_key + digest.digest() + \
                     self.rsa_signature + \
