@@ -19,7 +19,7 @@ IMAGE_MAGIC = "28FEB8C6"
 IMAGE_HEADER_SIZE = 56
 HASH_SIZE = 32
 RSA_SIGN_SIZE = 256
-ECDSA_SIGN_SIZE = 72    # It is the maximum length of the signature from secp256 curve
+ECDSA_SIGN_SIZE = 72    # It is the maximum length of the signature with secp256 curve
 E_VALUE = pow(2,16)+1
 RSA_SIZE = 2048
 RSA_KEY_PAIR_NAME = "newRSAKeypair.pem"
@@ -163,6 +163,7 @@ class Image():
             logging.debug("public ECDSA key hazmat PEM = {}".format(self.ecdsa_public_key.public_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PublicFormat.SubjectPublicKeyInfo)))
+
         else:
             self.ecdsa_public_key = self.ecdsa_private_key.publickey().exportKey(format='DER')
             logging.debug("public ECDSA key = {}".format(self.ecdsa_public_key.hex()))
@@ -187,34 +188,34 @@ class Image():
                   \
                   int(self.version).to_bytes(4, byteorder = self.endian) + \
                   \
-                  (IMAGE_HEADER_SIZE - 2).to_bytes(4, byteorder = self.endian) + \
+                  (IMAGE_HEADER_SIZE - 1).to_bytes(4, byteorder = self.endian) + \
                   \
                   (len(self.img_payload)).to_bytes(4, byteorder = self.endian) + \
                   \
-                  (IMAGE_HEADER_SIZE - 2 + len(self.img_payload)).to_bytes(4, byteorder = self.endian) + \
+                  (IMAGE_HEADER_SIZE - 1 + len(self.img_payload)).to_bytes(4, byteorder = self.endian) + \
                   \
                   (len(rsa_key)).to_bytes(4, byteorder = self.endian) + \
                   \
-                  (IMAGE_HEADER_SIZE - 2 + len(self.img_payload) + \
+                  (IMAGE_HEADER_SIZE - 1 + len(self.img_payload) + \
                     len(rsa_key) ).to_bytes(4, byteorder = self.endian) + \
                   \
                   (len(ecdsa_key)).to_bytes(4, byteorder = self.endian) + \
                   \
-                  (IMAGE_HEADER_SIZE - 2 + len(self.img_payload) + \
+                  (IMAGE_HEADER_SIZE - 1 + len(self.img_payload) + \
                     len(rsa_key) + len(ecdsa_key) ).to_bytes(4, byteorder = self.endian) + \
                   \
                   (32).to_bytes(4, byteorder = self.endian) + \
                   \
-                  (IMAGE_HEADER_SIZE - 2 + len(self.img_payload) + 32 + \
+                  (IMAGE_HEADER_SIZE - 1 + len(self.img_payload) + 32 + \
                     len(rsa_key) + len(ecdsa_key) ).to_bytes(4, byteorder = self.endian) + \
                   \
                   (RSA_SIGN_SIZE).to_bytes(4, byteorder = self.endian) + \
                   \
-                  (IMAGE_HEADER_SIZE - 2 + len(self.img_payload) + 32 + \
-                    len(rsa_key) + len(ecdsa_key) + RSA_SIGN_SIZE + 4 ).to_bytes(4, byteorder = self.endian) + \
-                  \
-                  (IMAGE_HEADER_SIZE - 2 + len(self.img_payload) + 32 + \
+                  (IMAGE_HEADER_SIZE - 1 + len(self.img_payload) + 32 + \
                     len(rsa_key) + len(ecdsa_key) + RSA_SIGN_SIZE ).to_bytes(4, byteorder = self.endian) + \
+                  \
+                  (IMAGE_HEADER_SIZE - 1 + len(self.img_payload) + 32 + \
+                    len(rsa_key) + len(ecdsa_key) + RSA_SIGN_SIZE + 4 ).to_bytes(4, byteorder = self.endian) + \
                   \
                   self.img_payload
 

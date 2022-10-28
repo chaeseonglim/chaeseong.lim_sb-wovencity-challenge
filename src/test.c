@@ -7,19 +7,34 @@
 
 /**
  * @brief Do unit tests for newly added implementations.
+ *        Those functions are not intended to run at runtime path.
+ *        It's suitable to run them at a separate debug path or on sort of gtest with CI/CD.
  *
- * @return zero if successful else nonzero
+ * @return VERIFY_SUCCESS if successful else any other error code
  */
 int do_unittest(void)
 {
     int rc = VERIFY_GENERIC_ERROR;
 
     // Test secureboot_memcmp()
-    rc = secureboot_unittest_memcmp();
+    printf("Testing secureboot_unittest_memcmp()..\n");
+    if( ( rc = secureboot_unittest_memcmp() ) != VERIFY_SUCCESS ) {
+        goto out;
+    }
 
     // Test secureboot_rollback()
-    rc |= secureboot_unittest_rollback();
+    printf("Testing secureboot_unittest_rollback()..\n");
+    if( ( rc = secureboot_unittest_rollback() ) != VERIFY_SUCCESS ) {
+        goto out;
+    }
 
+    // Test secureboot_sig_verify_ec()
+    printf("Testing secureboot_unittest_ec()..\n");
+    if( ( rc = secureboot_unittest_ec() ) != VERIFY_SUCCESS ) {
+        goto out;
+    }
+
+out:
     return rc;
 }
 

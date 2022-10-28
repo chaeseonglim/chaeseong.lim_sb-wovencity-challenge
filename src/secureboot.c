@@ -34,14 +34,14 @@
 
 
 /* Forward declarations */
-static int secureboot_rollback(uint8_t *payload, uint8_t cur_version);
+static int secureboot_rollback(const uint8_t *payload, uint8_t cur_version);
 static int secureboot_memcmp(const void *s1, const void *s2, size_t n);
+static int secureboot_sig_verify_ec(const uint8_t *hash, uint32_t hlen, const uint8_t *payload,
+        uint8_t *tmp_buf, uint32_t tmp_buf_sz, const struct opt_key *opt_key);
 
 /**
  * @brief It handles the fatal error.
  *        It will trigger a NULL dereference immediately to prevent fault injection.
- *        Inspired by https://research.nccgroup.com/2021/07/08/software-based-fault-injection-countermeasures-part-2-3/
- *
  */
 static inline void fatal(void)
 {
@@ -72,7 +72,7 @@ static inline int check_endian(void){
  *
  * TODO: improve readibility internal code style ternary 1 line fits in 80 lines.
  */
-static inline int _getFieldFromHeader(uint8_t *payload, int off)
+static inline int _getFieldFromHeader(const uint8_t *payload, int off)
 {
    return (check_endian())?(payload[off + 3] << 24) + \
         (payload[off + 2] << 16) + \
@@ -87,7 +87,7 @@ static inline int _getFieldFromHeader(uint8_t *payload, int off)
 /**
  * @brief Helper function to extract the field from the header.
  */
-static inline int getFieldFromHeader(uint8_t *payload, int off)
+static inline int getFieldFromHeader(const uint8_t *payload, int off)
 {
     volatile int data = _getFieldFromHeader(payload, off);
 
@@ -148,7 +148,7 @@ static int hex_to_base64(char *encoded, const unsigned char *string, size_t len)
  *        Added 'offset' parameter to check multiple public keys in header
  */
 static int
-secureboot_hash_pubkey(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz,
+secureboot_hash_pubkey(const uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz,
                 uint8_t *hash_result, int *key_id, uint32_t offset)
 {
     SHA256_CTX sha256_ctx;
@@ -189,7 +189,7 @@ secureboot_hash_pubkey(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz,
  * @brief Validate the SHA256 of the image including header and body
  */
 static int
-secureboot_hash_image_hdr_body(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz,
+secureboot_hash_image_hdr_body(const uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz,
                 uint8_t *hash_result)
 {
     volatile int rc = VERIFY_GENERIC_ERROR;
@@ -245,8 +245,8 @@ static void init_openssl(void)
  * @brief Implement signature verification based on RSA PSS
  *
  */
-static int secureboot_sig_verify_rsa(uint8_t *hash, uint32_t hlen, uint8_t *payload, uint8_t *tmp_buf,
-        uint32_t tmp_buf_sz, uint8_t key_id)
+static int secureboot_sig_verify_rsa(const uint8_t *hash, uint32_t hlen, const uint8_t *payload,
+        uint8_t *tmp_buf, uint32_t tmp_buf_sz, const struct opt_key *opt_key)
 {
     volatile int rc = VERIFY_GENERIC_ERROR;
 
@@ -255,8 +255,8 @@ static int secureboot_sig_verify_rsa(uint8_t *hash, uint32_t hlen, uint8_t *payl
     EVP_MD_CTX* rsa_verify_ctx = NULL;
     BIO *bufio;
 
+    // Get signature length from header
     siglen = getFieldFromHeader(payload, OFF_RSA_SIGN_LEN);
-
     IF_OR( siglen != RSA_SIG_BUF_SZ ) {
         rc = IMAGE_FORMAT_ERROR;
         goto out;
@@ -273,8 +273,8 @@ static int secureboot_sig_verify_rsa(uint8_t *hash, uint32_t hlen, uint8_t *payl
     }
 
     // Get base64 length of public key (with redundant writing)
-    volatile int pubkeyDER_len = base64_len(*opt_keys[key_id].pk_len);
-    IF_OR( pubkeyDER_len != base64_len(*opt_keys[key_id].pk_len) ) {
+    volatile int pubkeyDER_len = base64_len(*opt_key->pk_len);
+    IF_OR( pubkeyDER_len != base64_len(*opt_key->pk_len) ) {
         fatal();
     }
 
@@ -294,8 +294,8 @@ static int secureboot_sig_verify_rsa(uint8_t *hash, uint32_t hlen, uint8_t *payl
     // Copy header of pub key
     strncpy(biopubkeyDER, hdrpubkeyDER, biopubkeyDER_len);
     // Copy body of pub key
-    hex_to_base64(biopubkeyDER + hdrpubkeyDER_len, opt_keys[key_id].pk,
-            *opt_keys[key_id].pk_len);
+    hex_to_base64(biopubkeyDER + hdrpubkeyDER_len, opt_key->pk,
+            *opt_key->pk_len);
     // Copy footer of pub key
     // offset -1 to remove \0 at the end of base64 body
     strncpy(biopubkeyDER + hdrpubkeyDER_len + pubkeyDER_len - 1, fotpubkeyDER,
@@ -357,7 +357,7 @@ out:
  *
  * @return VERIFY_SUCCESS if success else VERIFY_VERSION_ERROR
  */
-static int secureboot_rollback(uint8_t *payload, uint8_t cur_version)
+static int secureboot_rollback(const uint8_t *payload, uint8_t cur_version)
 {
     // Extract version from the header
     volatile int version = getFieldFromHeader(payload, OFF_VERSION);
@@ -399,8 +399,8 @@ static int secureboot_memcmp(const void *s1, const void *s2, size_t n)
  * @brief Challenge: Implement a signature verification supporting Eliptic Curve
  * using openssl primitives and provide a keys.h with example of keys
  */
-static int secureboot_sig_verify_ec(uint8_t *hash, uint32_t hlen, uint8_t *payload, uint8_t *tmp_buf,
-        uint32_t tmp_buf_sz, uint8_t key_id)
+static int secureboot_sig_verify_ec(const uint8_t *hash, uint32_t hlen, const uint8_t *payload,
+        uint8_t *tmp_buf, uint32_t tmp_buf_sz, const struct opt_key *opt_key)
 {
     volatile int rc = VERIFY_GENERIC_ERROR;
 
@@ -410,7 +410,7 @@ static int secureboot_sig_verify_ec(uint8_t *hash, uint32_t hlen, uint8_t *paylo
     EVP_MD_CTX* ecdsa_verify_ctx = NULL;
     BIO *bufio;
 
-    // Get the size of ECDSA signature (it's variable length)
+    // Get the size of ECDSA signature in the trailer part (ECDSA signature has a variable size)
     // TODO: add sanity check to prevent overrun if value in OFF_ECDSA_SIGN_LEN is bigger than the payload size
     siglen = getFieldFromHeader(payload, getFieldFromHeader(payload, OFF_ECDSA_SIGN_LEN) +
             OFF_OFF_HDR);
@@ -431,7 +431,10 @@ static int secureboot_sig_verify_ec(uint8_t *hash, uint32_t hlen, uint8_t *paylo
         goto out;
     }
 
-    int pubkeyDER_len = base64_len(*opt_keys[key_id].pk_len);
+    volatile int pubkeyDER_len = base64_len(*opt_key->pk_len);
+    IF_OR( pubkeyDER_len != base64_len(*opt_key->pk_len) ) {
+        fatal();
+    }
 
     // Prepare header and footer of public key string
     const char *hdrpubkeyDER = "-----BEGIN PUBLIC KEY-----\n",
@@ -448,8 +451,8 @@ static int secureboot_sig_verify_ec(uint8_t *hash, uint32_t hlen, uint8_t *paylo
     // Copy header of pub key
     strncpy(biopubkeyDER, hdrpubkeyDER, biopubkeyDER_len);
     // Copy body of pub key
-    hex_to_base64(biopubkeyDER + hdrpubkeyDER_len, opt_keys[key_id].pk,
-            *opt_keys[key_id].pk_len);
+    hex_to_base64(biopubkeyDER + hdrpubkeyDER_len, opt_key->pk,
+            *opt_key->pk_len);
     // Copy footer of pub key
     // offset -1 to remove \0 at the end of base64 body
     strncpy(biopubkeyDER + hdrpubkeyDER_len + pubkeyDER_len - 1, fotpubkeyDER,
@@ -463,7 +466,7 @@ static int secureboot_sig_verify_ec(uint8_t *hash, uint32_t hlen, uint8_t *paylo
         rc = EVP_PKEY_INIT_ERROR;
         goto out_buf;
     }
-    // EC_KEY to EVP_PKEY
+    // Convert EC_KEY to EVP_PKEY
     pkey = EVP_PKEY_new();
     rc = EVP_PKEY_set1_EC_KEY(pkey, eckey);
     IF_OR( !rc ) {
@@ -525,7 +528,7 @@ secureboot_validate_image(uint8_t *payload, uint8_t *tmp_buf,
     uint8_t hash[HASH_SZ];
 
     // validate the hash of the public key with the one stored in the OTP
-    uint32_t pubkeys[] = { OFF_RSA_PK, OFF_ECDSA_PK };
+    const uint32_t pubkeys[] = { OFF_RSA_PK, OFF_ECDSA_PK };
     for( size_t i = 0; i < sizeof(pubkeys)/sizeof(uint32_t); ++i ) {
         int key_id = VERIFY_GENERIC_ERROR;
         IF_OR( ( rc = secureboot_hash_pubkey(payload, tmp_buf, tmp_buf_sz,
@@ -549,16 +552,16 @@ secureboot_validate_image(uint8_t *payload, uint8_t *tmp_buf,
     init_openssl();
 
     // verify the signature of the image with RSA public key
-    IF_OR( ( rc = secureboot_sig_verify_rsa(hash, HASH_SZ, payload , tmp_buf,
-            tmp_buf_sz, 0) ) != VERIFY_SUCCESS ) {
+    IF_OR( ( rc = secureboot_sig_verify_rsa(hash, HASH_SZ, payload, tmp_buf,
+            tmp_buf_sz, &opt_keys[0]) ) != VERIFY_SUCCESS ) {
         // error means that verification is incorrect
         printf("RSA Signature verification is failed\n" );
         goto out;
     }
 
     // verify the signature of the image with ECDSA public key
-    IF_OR( ( rc = secureboot_sig_verify_ec(hash, HASH_SZ, payload , tmp_buf,
-            tmp_buf_sz, 1) ) != VERIFY_SUCCESS ) {
+    IF_OR( ( rc = secureboot_sig_verify_ec(hash, HASH_SZ, payload, tmp_buf,
+            tmp_buf_sz, &opt_keys[1]) ) != VERIFY_SUCCESS ) {
         // error means that verification is incorrect
         printf("ECDSA Signature verification is failed\n" );
         goto out;
@@ -632,11 +635,11 @@ static inline int _test_memcmp( const struct memcmp_testvectors* tv, size_t tv_c
 /**
  * @brief Unit test for secureboot_memcmp()
  *
- * @return VERIFY_SUCCESS if success else VERIFY_VERSION_ERROR
+ * @return VERIFY_SUCCESS if success
  */
 int secureboot_unittest_memcmp(void)
 {
-    // Prepare the test vectors which have zero or single difference between the pair.
+    // Prepare test vectors which have zero or single difference between the pair.
     const struct memcmp_testvectors tvs[] = {
         { "A123456789123456789123456789123456789123456789",
           "A123456789123456789123456789123456789123456789" }, // same
@@ -650,20 +653,25 @@ int secureboot_unittest_memcmp(void)
           "D123456789123456789123456789123456789123456780" }, // the last ch
     };
 
-    const size_t iteration = 1000;
+    int rc = VERIFY_GENERIC_ERROR;
 
-    int rc = 0;
+    const size_t iteration = 1000;
 
     // Test original memcmp()
     printf("- original memcmp() test\n");
-    rc |= _test_memcmp( tvs, sizeof(tvs) / sizeof(struct memcmp_testvectors), iteration,
-            memcmp );
+    if( ( rc = _test_memcmp( tvs, sizeof(tvs) / sizeof(struct memcmp_testvectors), iteration,
+            memcmp ) ) != VERIFY_SUCCESS ) {
+        goto out;
+    }
 
     // Test secureboot_memcmp()
     printf("- secureboot_memcmp() test\n");
-    rc |= _test_memcmp( tvs, sizeof(tvs) / sizeof(struct memcmp_testvectors), iteration,
-            secureboot_memcmp );
+    if( ( rc = _test_memcmp( tvs, sizeof(tvs) / sizeof(struct memcmp_testvectors), iteration,
+            secureboot_memcmp ) ) != VERIFY_SUCCESS ) {
+        goto out;
+    }
 
+out:
     return rc;
 }
 
@@ -674,15 +682,15 @@ int secureboot_unittest_memcmp(void)
  */
 int secureboot_unittest_rollback(void)
 {
-    // Prepare the test vectors which contain possible versions of the image.
+    // Prepare test vectors which contain possible versions of the image.
     const uint32_t tvs[] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
-    volatile int rc = VERIFY_GENERIC_ERROR;
+    int rc = VERIFY_GENERIC_ERROR;
 
     for( size_t i = 0; i < sizeof(tvs)/sizeof(uint32_t); ++i ) {
         struct img_hdr hdr = { IMAGE_MAGIC, tvs[i] };
 
         rc = secureboot_rollback((uint8_t *)&hdr, EMBEDDED_VERSION);
-        IF_OR( ( rc == VERIFY_SUCCESS && tvs[i] <= EMBEDDED_VERSION ) ||
+        if( ( rc == VERIFY_SUCCESS && tvs[i] <= EMBEDDED_VERSION ) ||
                 ( rc != VERIFY_SUCCESS && tvs[i] > EMBEDDED_VERSION ) ) {
             return VERIFY_VERSION_ERROR;
         }
@@ -690,4 +698,78 @@ int secureboot_unittest_rollback(void)
     }
 
     return VERIFY_SUCCESS;
+}
+
+/**
+ * @brief Unit test for secureboot_sig_verify_ec()
+ *
+ * @return VERIFY_SUCCESS if success else VERIFY_VERSION_ERROR
+ */
+int secureboot_unittest_ec(void)
+{
+    // Prepare test vectors
+    const unsigned char ecdsa256_pub_key[] = {
+        0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86,
+        0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a,
+        0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03,
+        0x42, 0x00, 0x04, 0x6f, 0x94, 0x57, 0xd5, 0xa0,
+        0x80, 0xb2, 0x5a, 0xd1, 0x2d, 0x43, 0xb3, 0x53,
+        0x80, 0x8b, 0x8d, 0x72, 0xe1, 0xdb, 0x57, 0x76,
+        0x55, 0x54, 0x98, 0x41, 0x25, 0x45, 0xc0, 0x92,
+        0xff, 0x2e, 0x2e, 0x54, 0xe5, 0x5e, 0x31, 0x52,
+        0x70, 0xa8, 0x7e, 0x34, 0x72, 0x87, 0xaa, 0x68,
+        0xa7, 0x4c, 0xe9, 0xa1, 0x76, 0xa3, 0x1f, 0x45,
+        0x66, 0x9c, 0x80, 0x61, 0x52, 0x89, 0x22, 0x5f,
+        0xbe, 0x73, 0x2a
+    };
+    const unsigned int ecdsa256_pub_key_len = 91;
+    const unsigned char ecdsa256_pub_key_hash[] = {
+        0x36, 0xea, 0xee, 0x6a, 0xea, 0x0d, 0x89, 0x1c,
+        0x59, 0xb0, 0x38, 0x7b, 0xd3, 0x11, 0x00, 0x0d,
+        0xd9, 0xa5, 0x6a, 0xe4, 0xa1, 0x79, 0x90, 0x23,
+        0xf9, 0xdd, 0x86, 0x97, 0x7b, 0xb4, 0x76, 0x91
+    };
+    const struct opt_key opt_key = {
+        .hash_pk = ecdsa256_pub_key_hash,
+        .pk_len = &ecdsa256_pub_key_len,
+        .pk = ecdsa256_pub_key,
+    };
+    const unsigned char hash[] = {
+        0x93, 0xda, 0x6f, 0xbd, 0x5c, 0x9d, 0x12, 0xed,
+        0x11, 0xe0, 0xa9, 0x1a, 0xd7, 0x64, 0x2e, 0x25,
+        0xb1, 0xd9, 0xf8, 0x31, 0x87, 0x84, 0x44, 0xc4,
+        0x0e, 0xf8, 0x71, 0x7e, 0x8f, 0x52, 0xd9, 0x07
+    };
+    const uint32_t hlen = 32;
+    const unsigned char sig[] = {
+        0x30, 0x44, 0x02, 0x20, 0x24, 0xa7, 0x07, 0x5c,
+        0xb8, 0xd0, 0xa1, 0x6c, 0xfe, 0x24, 0x54, 0x09,
+        0x34, 0xc1, 0x3a, 0xe5, 0x03, 0x76, 0x9c, 0x31,
+        0x44, 0x83, 0x07, 0x29, 0x03, 0x50, 0x67, 0xcf,
+        0x9d, 0x74, 0xe9, 0x0f, 0x02, 0x20, 0x75, 0xd9,
+        0xb4, 0xc0, 0xaf, 0x0d, 0x49, 0x0a, 0x57, 0x4a,
+        0x6f, 0xf5, 0x2d, 0x5e, 0xfb, 0x28, 0x17, 0x38,
+        0xc9, 0xe1, 0xf7, 0xd3, 0x95, 0xf6, 0xa9, 0xf7,
+        0xad, 0xee, 0xf9, 0xd8, 0xc4, 0x38
+    };
+    const uint32_t siglen = 70;
+    uint8_t payload[TMPBUF_SZ];
+    uint8_t tmpbuf[TMPBUF_SZ];
+
+    // Create dummy payload
+    struct img_hdr *hdr = (struct img_hdr *)payload;
+    hdr->hash_off = IMAGE_HDR_SZ - OFF_OFF_HDR;
+    hdr->hash_len = hlen;
+    hdr->ecdsa_sign_len_off = hdr->hash_off + hdr->hash_len;
+    hdr->ecdsa_sign_off = hdr->ecdsa_sign_len_off + 4;
+
+    memcpy( payload + hdr->hash_off + OFF_OFF_HDR, hash, hlen );
+    memcpy( payload + hdr->ecdsa_sign_len_off + OFF_OFF_HDR, &siglen, 4 );
+    memcpy( payload + hdr->ecdsa_sign_off + OFF_OFF_HDR, sig, siglen );
+
+    // run secureboot_sig_verify_ec
+    init_openssl();
+    int rc = secureboot_sig_verify_ec(hash, hlen, payload, tmpbuf, TMPBUF_SZ, &opt_key );
+
+    return rc;
 }

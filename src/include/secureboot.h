@@ -25,23 +25,22 @@ extern "C" {
 #endif
 
 // TODO improve naming because it is better for readibility.
-#define OFF_VERSION         4                       /* Image version */
-#define OFF_IMG             (OFF_VERSION) + 4       /* Image offset to image body offset*/
-#define OFF_IMG_LEN         (OFF_IMG) + 4           /* Image body length */
-#define OFF_RSA_PK          (OFF_IMG_LEN) + 4       /* Image offset to RSA Public key offset */
-#define OFF_RSA_PK_LEN      (OFF_RSA_PK) + 4        /* RSA Public Key length  */
-#define OFF_ECDSA_PK        (OFF_RSA_PK_LEN) + 4    /* Image offset to ECDSA Public key offset */
-#define OFF_ECDSA_PK_LEN    (OFF_ECDSA_PK) + 4      /* ECDSA Public Key length  */
-#define OFF_HASH            (OFF_ECDSA_PK_LEN) + 4  /* Image offset to Hash offset */
-#define OFF_HASH_LEN        (OFF_HASH) + 4          /* Hash length  */
-#define OFF_RSA_SIGN        (OFF_HASH_LEN) + 4      /* Image offset to RSA signature offset */
-#define OFF_RSA_SIGN_LEN    (OFF_RSA_SIGN) + 4      /* RSA Signature length  */
-#define OFF_ECDSA_SIGN      (OFF_RSA_SIGN_LEN) + 4  /* Image offset to ECDSA signature offset */
-#define OFF_ECDSA_SIGN_LEN  (OFF_ECDSA_SIGN) + 4    /* Image offset to ECDSA Signature length  */
+#define OFF_VERSION         4                           /* Image version */
+#define OFF_IMG             (OFF_VERSION) + 4           /* Image offset to image body offset*/
+#define OFF_IMG_LEN         (OFF_IMG) + 4               /* Image body length */
+#define OFF_RSA_PK          (OFF_IMG_LEN) + 4           /* Image offset to RSA Public key offset */
+#define OFF_RSA_PK_LEN      (OFF_RSA_PK) + 4            /* RSA Public Key length  */
+#define OFF_ECDSA_PK        (OFF_RSA_PK_LEN) + 4        /* Image offset to ECDSA Public key offset */
+#define OFF_ECDSA_PK_LEN    (OFF_ECDSA_PK) + 4          /* ECDSA Public Key length  */
+#define OFF_HASH            (OFF_ECDSA_PK_LEN) + 4      /* Image offset to Hash offset */
+#define OFF_HASH_LEN        (OFF_HASH) + 4              /* Hash length  */
+#define OFF_RSA_SIGN        (OFF_HASH_LEN) + 4          /* Image offset to RSA signature offset */
+#define OFF_RSA_SIGN_LEN    (OFF_RSA_SIGN) + 4          /* RSA Signature length  */
+#define OFF_ECDSA_SIGN_LEN  (OFF_RSA_SIGN_LEN) + 4      /* Image offset to ECDSA signature length */
+#define OFF_ECDSA_SIGN      (OFF_ECDSA_SIGN_LEN) + 4    /* Image offset to ECDSA Signature offset  */
 
-// The "offset" for offset field in the header (in bytes)
-// Offset + Magic(1) + Version(1)
-#define OFF_OFF_HDR     (2)
+// The "offset" of offset field in the header (in bytes)
+#define OFF_OFF_HDR     (1)
 
 // Error Codes
 #define VERIFY_SUCCESS          0X80000000
@@ -93,8 +92,8 @@ struct img_hdr {
     uint32_t hash_len;              /* Size of hash. */
     uint32_t rsa_sign_off;          /* offset to the RSA signature  */
     uint32_t rsa_sign_len;          /* Size of RSA signature (in bytes). */
-    uint32_t ecdsa_sign_off;        /* offset to the ECDSA signature  */
     uint32_t ecdsa_sign_len_off;    /* offset to size of ECDSA signature (in bytes). */
+    uint32_t ecdsa_sign_off;        /* offset to the ECDSA signature  */
 };
 
 #define IMAGE_MAGIC     0x28FEB8C6
@@ -106,6 +105,7 @@ int secureboot_validate_image( uint8_t *payload, uint8_t *tmp_buf,
 // Unit tests
 int secureboot_unittest_memcmp(void);
 int secureboot_unittest_rollback(void);
+int secureboot_unittest_ec(void);
 
 #ifdef __cplusplus
 }
