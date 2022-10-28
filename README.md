@@ -400,7 +400,6 @@ int
 secureboot_validate_image(uint8_t *payload, uint8_t *tmp_buf,
                       uint32_t tmp_buf_sz)
 {
-
     ...
 
     // verify the signature of the image with ECDSA public key
