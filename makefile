@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-Wall -Wreturn-type -Wdeprecated-declarations -DDEBUG
+CFLAGS=-Wall -Wreturn-type -Wdeprecated-declarations -DDEBUG -O2
 RUN_FOLDER=unit_test
 SAMPLE_FOLDER=samples
 SAMPLE_NAME=test
@@ -48,7 +48,7 @@ $(BUILDDIR)/test: $(OBJ)
 	$(CC) -o $(BUILDDIR)/test $(OBJ) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -lssl -lcrypto -v
 
 $(BUILDDIR)/%.o: $(SRCDIR)/%.c
-	$(CC)  -lssl -lcrypto -c $< -o $@ $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -O2
+	$(CC)  -lssl -lcrypto -c $< -o $@ $(CPPFLAGS) $(CFLAGS) $(LDFLAGS)
 
 build_secureboot_app: $(BUILDDIR)/test
 

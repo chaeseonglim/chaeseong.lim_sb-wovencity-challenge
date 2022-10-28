@@ -100,7 +100,7 @@ struct img_hdr {
 #define IMAGE_HDR_SZ    sizeof(struct img_hdr)
 
 int secureboot_validate_image( uint8_t *payload, uint8_t *tmp_buf,
-                      uint32_t tmp_buf_sz);
+                               uint32_t tmp_buf_sz);
 
 // Unit tests
 int secureboot_unittest_memcmp(void);
