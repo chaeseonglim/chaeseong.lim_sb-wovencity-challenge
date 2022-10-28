@@ -56,7 +56,14 @@ static inline void fatal(void)
 static inline int check_endian(void){
     uint32_t x = 1;
     uint8_t *test = (uint8_t*)&x;
-    return (int)*test;
+    volatile int rc = (int)*test;
+    IF_AND(rc == (int)(*(uint8_t*)&x)) {
+        return rc;
+    }
+    else {
+        fatal();
+        return rc;
+    }
 }
 
 /**
@@ -67,11 +74,7 @@ static inline int check_endian(void){
  */
 static inline int _getFieldFromHeader(uint8_t *payload, int off)
 {
-    volatile int endian = check_endian();
-    IF_OR( endian != check_endian() ) {
-        fatal();
-    }
-    volatile int data = (endian)?(payload[off + 3] << 24) + \
+   return (check_endian())?(payload[off + 3] << 24) + \
         (payload[off + 2] << 16) + \
         (payload[off + 1] << 8) + \
         payload[off]:
@@ -79,14 +82,12 @@ static inline int _getFieldFromHeader(uint8_t *payload, int off)
         (payload[off + 1] << 16) + \
         (payload[off + 2] << 8) + \
         payload[off + 3];
-
-    return data;
 }
 
 /**
  * @brief Helper function to extract the field from the header.
  */
-static int getFieldFromHeader(uint8_t *payload, int off)
+static inline int getFieldFromHeader(uint8_t *payload, int off)
 {
     volatile int data = _getFieldFromHeader(payload, off);
 
@@ -98,7 +99,7 @@ static int getFieldFromHeader(uint8_t *payload, int off)
     return data;
 }
 
-static unsigned int base64_len(size_t len)
+static inline unsigned int base64_len(size_t len)
 {
     return ((len + 2) / 3 * 4) + 1;
 }
@@ -124,7 +125,7 @@ static int hex_to_base64(char *encoded, const unsigned char *string, size_t len)
                         ((int) (string[i + 2] & 0xC0) >> 6)];
         *p++ = base64[string[i + 2] & 0x3F];
     }
-    IF_AND (i < len) {
+    IF_AND( i < len ) {
         *p++ = base64[(string[i] >> 2) & 0x3F];
         IF_AND (i == (len - 1)) {
             *p++ = base64[((string[i] & 0x3) << 4)];
@@ -165,7 +166,7 @@ secureboot_hash_pubkey(uint8_t *payload, uint8_t *tmp_buf, uint32_t tmp_buf_sz,
     // for images bigger than 1000 to avoid overflowing tmp buffer
     for (off = 0; off < size; off += blk_sz) {
         blk_sz = size - off;
-        IF_OR (blk_sz > tmp_buf_sz) {
+        IF_OR( blk_sz > tmp_buf_sz ) {
             blk_sz = tmp_buf_sz;
         }
         memcpy(tmp_buf, payload + getFieldFromHeader(payload, offset) + OFF_OFF_HDR + off, blk_sz);
@@ -271,7 +272,11 @@ static int secureboot_sig_verify_rsa(uint8_t *hash, uint32_t hlen, uint8_t *payl
         goto out;
     }
 
-    int pubkeyDER_len = base64_len(*opt_keys[key_id].pk_len);
+    // Get base64 length of public key (with redundant writing)
+    volatile int pubkeyDER_len = base64_len(*opt_keys[key_id].pk_len);
+    IF_OR( pubkeyDER_len != base64_len(*opt_keys[key_id].pk_len) ) {
+        fatal();
+    }
 
     // Prepare header and footer of public key string
     const char *hdrpubkeyDER = "-----BEGIN PUBLIC KEY-----\n",
@@ -326,7 +331,6 @@ static int secureboot_sig_verify_rsa(uint8_t *hash, uint32_t hlen, uint8_t *payl
         printf("Verification Success - \t");
     }
     else {
-        // fail closed
         rc = VERIFY_FINAL_ERROR;
         goto out_buf;
     }
@@ -488,7 +492,6 @@ static int secureboot_sig_verify_ec(uint8_t *hash, uint32_t hlen, uint8_t *paylo
         printf("Verification Success - \t");
     }
     else {
-        // fail closed
         rc = VERIFY_FINAL_ERROR;
         goto out_buf;
     }
@@ -525,9 +528,9 @@ secureboot_validate_image(uint8_t *payload, uint8_t *tmp_buf,
     uint32_t pubkeys[] = { OFF_RSA_PK, OFF_ECDSA_PK };
     for( size_t i = 0; i < sizeof(pubkeys)/sizeof(uint32_t); ++i ) {
         int key_id = VERIFY_GENERIC_ERROR;
-        rc = secureboot_hash_pubkey(payload, tmp_buf, tmp_buf_sz,
-                    hash, &key_id, pubkeys[i]);
-        IF_OR( rc != VERIFY_SUCCESS ||  0 > key_id || key_id > NUM_PK_OTP ) {
+        IF_OR( ( rc = secureboot_hash_pubkey(payload, tmp_buf, tmp_buf_sz,
+                        hash, &key_id, pubkeys[i]) ) != VERIFY_SUCCESS ||
+                0 > key_id || key_id > NUM_PK_OTP ) {
             // error means that hash of PK not matching ones in the OTP
             printf("Public Key verification is failed at %zu\n", i );
             goto out;
@@ -535,8 +538,8 @@ secureboot_validate_image(uint8_t *payload, uint8_t *tmp_buf,
     }
 
     // validate the hash of the image header and body with the one computed
-    rc = secureboot_hash_image_hdr_body(payload, tmp_buf,tmp_buf_sz, hash);
-    IF_OR( rc != VERIFY_SUCCESS ) {
+    IF_OR( ( rc = secureboot_hash_image_hdr_body(payload, tmp_buf,tmp_buf_sz, hash) )
+            != VERIFY_SUCCESS ) {
         // error means that sha is not done
         printf("Hash verification is failed\n" );
         goto out;
@@ -546,26 +549,23 @@ secureboot_validate_image(uint8_t *payload, uint8_t *tmp_buf,
     init_openssl();
 
     // verify the signature of the image with RSA public key
-    rc = secureboot_sig_verify_rsa(hash, HASH_SZ, payload , tmp_buf,
-            tmp_buf_sz, 0);
-    IF_OR( rc != VERIFY_SUCCESS ) {
+    IF_OR( ( rc = secureboot_sig_verify_rsa(hash, HASH_SZ, payload , tmp_buf,
+            tmp_buf_sz, 0) ) != VERIFY_SUCCESS ) {
         // error means that verification is incorrect
         printf("RSA Signature verification is failed\n" );
         goto out;
     }
 
     // verify the signature of the image with ECDSA public key
-    rc = secureboot_sig_verify_ec(hash, HASH_SZ, payload , tmp_buf,
-            tmp_buf_sz, 1);
-    IF_OR( rc != VERIFY_SUCCESS ) {
+    IF_OR( ( rc = secureboot_sig_verify_ec(hash, HASH_SZ, payload , tmp_buf,
+            tmp_buf_sz, 1) ) != VERIFY_SUCCESS ) {
         // error means that verification is incorrect
         printf("ECDSA Signature verification is failed\n" );
         goto out;
     }
 
     // verify the image version is not an old one
-    rc = secureboot_rollback(payload, EMBEDDED_VERSION);
-    IF_OR( rc != VERIFY_SUCCESS ) {
+    IF_OR( ( rc = secureboot_rollback(payload, EMBEDDED_VERSION) ) != VERIFY_SUCCESS ) {
         // error means that the version of payload is deprecated
         printf("Image rollback is detected\n" );
         goto out;

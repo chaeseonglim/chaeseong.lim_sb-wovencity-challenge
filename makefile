@@ -23,11 +23,11 @@ OBJ=$(patsubst $(SRCDIR)/%.c, $(BUILDDIR)/%.o, $(SRC))
 # check_dependencies:
 
 # install create the build folder and unit test folder
-install: 
+install:
 	@mkdir -p $(RUN_FOLDER)
 	@mkdir -p $(BUILDDIR)
 
-gen_sample_bin: $(SAMPLE_TEST) 
+gen_sample_bin: $(SAMPLE_TEST)
 
 # to Generate the samples images
 $(SAMPLE_TEST).o: $(SAMPLE_TEST).c
@@ -36,7 +36,7 @@ $(SAMPLE_TEST).o: $(SAMPLE_TEST).c
 $(SAMPLE_TEST): $(SAMPLE_TEST).o
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $(SAMPLE_TEST) $<
 
-# sign the sample image 
+# sign the sample image
 build_sign_sample_image:
 	python3 $(SCRIPT_FOLDER)/image.py $(RUN_FOLDER) $(SAMPLE_TEST) $(IMAGE_VERSION)
 
@@ -48,11 +48,11 @@ $(BUILDDIR)/test: $(OBJ)
 	$(CC) -o $(BUILDDIR)/test $(OBJ) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -lssl -lcrypto -v
 
 $(BUILDDIR)/%.o: $(SRCDIR)/%.c
-	$(CC)  -lssl -lcrypto -c $< -o $@ $(CPPFLAGS) $(CFLAGS) $(LDFLAGS)
+	$(CC)  -lssl -lcrypto -c $< -o $@ $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -O2
 
 build_secureboot_app: $(BUILDDIR)/test
 
-.PHONY: clean 
+.PHONY: clean
 
 all: clean install gen_sample_bin build_sign_sample_image test_sign_keypair build_secureboot_app
 	ln -s $(BUILDDIR)/test test
