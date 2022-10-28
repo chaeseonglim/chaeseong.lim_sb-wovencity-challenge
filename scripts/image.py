@@ -72,12 +72,15 @@ class Image():
                     encoding=serialization.Encoding.PEM,
                     format=serialization.PrivateFormat.PKCS8,
                     encryption_algorithm=enc)
+
+            with open(path, 'w') as f:
+                f.write(pem.decode())
         else:
             key = RSA.generate(RSA_SIZE)
-            pem = key.exportKey()
+            pem = key.export_key(format='PEM', pkcs=8)
 
-        with open(path, 'w') as f:
-            f.write(pem.decode())
+            with open(path, 'wb') as f:
+                f.write(pem)
 
     def _createECDSAKeypair(self, path, passwd=None):
         """Create private method for ECDSA Key using two external libraries
@@ -92,12 +95,15 @@ class Image():
                     encoding=serialization.Encoding.PEM,
                     format=serialization.PrivateFormat.PKCS8,
                     encryption_algorithm=enc)
+
+            with open(path, 'w') as f:
+                f.write(pem.decode())
         else:
             key = ECC.generate(curve='P-256')
-            pem = key.exportKey()
+            pem = key.export_key(format='PEM')
 
-        with open(path, 'w') as f:
-            f.write(pem.decode())
+            with open(path, 'w') as f:
+                f.write(pem)
 
     def getRSAPublicKey(self, path, password=None):
         """ Generate the RSA public key and keypair if it does not exists using two external libraries
@@ -129,10 +135,10 @@ class Image():
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PublicFormat.SubjectPublicKeyInfo)))
         else:
-            self.rsa_public_key = self.rsa_private_key.publickey().exportKey(format='DER')
+            self.rsa_public_key = self.rsa_private_key.publickey().export_key(format='DER', pkcs=8)
             logging.debug("public RSA key = {}".format(self.rsa_public_key.hex()))
             logging.debug("public RSA key digest= {}".format(SHA256.new(self.rsa_public_key).hexdigest()))
-            logging.debug("public RSA key PEM = {}".format(self.rsa_private_key.publickey().exportKey()))
+            logging.debug("public RSA key PEM = {}".format(self.rsa_private_key.publickey().export_key(pkcs=8)))
 
     def getECDSAPublicKey(self, path, password=None):
         """ Generate the ECDSA public key and keypair if it does not exists using two external libraries
@@ -149,7 +155,7 @@ class Image():
                         password=password,
                         backend=default_backend())
                 else:
-                    self.ecdsa_private_key = ECDSA.import_key(raw_pem)
+                    self.ecdsa_private_key = ECC.import_key(raw_pem)
         except FileNotFoundError:
             raise click.UsageError("Keypair file not found")
 
@@ -165,10 +171,10 @@ class Image():
                 format=serialization.PublicFormat.SubjectPublicKeyInfo)))
 
         else:
-            self.ecdsa_public_key = self.ecdsa_private_key.publickey().exportKey(format='DER')
+            self.ecdsa_public_key = self.ecdsa_private_key.public_key().export_key(format='DER')
             logging.debug("public ECDSA key = {}".format(self.ecdsa_public_key.hex()))
             logging.debug("public ECDSA key digest= {}".format(SHA256.new(self.ecdsa_public_key).hexdigest()))
-            logging.debug("public ECDSA key PEM = {}".format(self.ecdsa_private_key.publickey().exportKey()))
+            logging.debug("public ECDSA key PEM = {}".format(self.ecdsa_private_key.public_key().export_key(format='PEM')))
 
     def buildSignedImg(self, rsa_kp_path, ecdsa_kp_path, out_path):
         """ Compute the signature RSA based on PSS or PKCS1v15 and ECDSA """
@@ -243,7 +249,6 @@ class Image():
                 self.ecdsa_signature = self.ecdsa_private_key.sign(
                     digest.digest(),
                     ec.ECDSA(hashes.SHA256()))
-                print(len(self.ecdsa_signature))
             else:
                 # Load RSA key file
                 try:
@@ -260,19 +265,20 @@ class Image():
 
                 # Sign RSA signature
                 if self.pss:
-                    signer = pss.new(RSA.importKey(rsa_keypair))
+                    signer = pss.new(RSA.import_key(rsa_keypair))
                 else:
-                    signer = pkcs1_15.new(RSA.importKey(rsa_keypair))
+                    signer = pkcs1_15.new(RSA.import_key(rsa_keypair))
                 self.rsa_signature = signer.sign(digest)
 
                 # Sign ECDSA signature
-                signer = DSS.new(ECC.import_key(ecdsa_keypair))
+                signer = DSS.new(ECC.import_key(ecdsa_keypair), 'fips-186-3')
                 self.ecdsa_signature = signer.sign(digest)
             logging.debug("RSA signature = {}".format(self.rsa_signature.hex()))
             logging.debug("ECDSA signature = {}".format(self.ecdsa_signature.hex()))
         except TypeError:
             raise click.UsageError("signature process fails")
 
+        print(len(self.rsa_signature))
         with open(out_path, 'wb') as f:
             f.write(self.img_payload + rsa_key + ecdsa_key + digest.digest() + \
                     self.rsa_signature + \
@@ -327,7 +333,7 @@ class Image():
                 verifier.verify(digest, self.rsa_signature)
 
                 # Verify ECDSA signature
-                verifier = DSS.new(ECC.import_key(ecdsa_keypair))
+                verifier = DSS.new(ECC.import_key(self.ecdsa_public_key), 'fips-186-3')
                 verifier.verify(digest, self.ecdsa_signature)
         except (ValueError, TypeError):
             raise click.UsageError("Signature error")
